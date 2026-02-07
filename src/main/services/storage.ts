@@ -1,12 +1,5 @@
 import path from 'path';
 import fs from 'fs';
-import { app } from 'electron';
-
-export function getDefaultStorageRoot(): string {
-  const localAppData = process.env.LOCALAPPDATA;
-  const basePath = localAppData && localAppData.length > 0 ? localAppData : app.getPath('userData');
-  return path.join(basePath, 'GameSaver', 'Backups');
-}
 
 export function ensureDir(targetPath: string): void {
   fs.mkdirSync(targetPath, { recursive: true });

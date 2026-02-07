@@ -70,10 +70,6 @@ export function loadSettings(): Settings {
   return cachedSettings;
 }
 
-export function getSettings(): Settings {
-  return loadSettings();
-}
-
 export async function saveSettings(settings: Settings): Promise<Settings> {
   cachedSettings = settings;
   await fs.promises.mkdir(settings.dataRoot, { recursive: true });
@@ -127,4 +123,3 @@ async function moveDirectory(source: string, destination: string): Promise<void>
     await fs.promises.mkdir(destination, { recursive: true });
   }
 }
-

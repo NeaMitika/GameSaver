@@ -1,6 +1,6 @@
 import fs from 'fs';
 import { v4 as uuid } from 'uuid';
-import { AddGamePayload, EventLog, Game, GameDetail, GameSummary, Snapshot, SnapshotReason } from '../../shared/types';
+import { AddGamePayload, Game, GameDetail, GameSummary, SnapshotReason } from '../../shared/types';
 import { detectSaveLocations } from './detectSaveLocations';
 import { AppDb, StoredGame, persistDb } from './db';
 import { logEvent } from './eventLogService';
@@ -147,18 +147,6 @@ export function getStoredGameById(db: AppDb, gameId: string): StoredGame | undef
   return db.state.games.find((game) => game.id === gameId);
 }
 
-export function listStoredGames(db: AppDb): StoredGame[] {
-  return db.state.games.slice();
-}
-
-export function listStoredSnapshots(db: AppDb): Snapshot[] {
-  return db.state.snapshots.slice();
-}
-
-export function listStoredEventLogs(db: AppDb): EventLog[] {
-  return db.state.eventLogs.slice();
-}
-
 export function toPublicGame(stored: StoredGame): Game {
   return {
     id: stored.id,
@@ -184,4 +172,3 @@ function ensureGameFolder(storageRoot: string, gameFolder: string, game: StoredG
   };
   fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8');
 }
-

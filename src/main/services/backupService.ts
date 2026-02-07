@@ -788,14 +788,3 @@ function resolveSnapshotFileAbsolutePath(
   }
   return path.join(snapshotRoot, storageFolder, file.relative_path);
 }
-
-export function ensureRecoveredGameFolderName(game: StoredGame): StoredGame {
-  const safeFolder = toSafeGameFolderName(game.folder_name || game.name);
-  if (safeFolder === game.folder_name) {
-    return game;
-  }
-  return {
-    ...game,
-    folder_name: safeFolder
-  };
-}

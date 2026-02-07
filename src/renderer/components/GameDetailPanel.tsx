@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { GameDetail, Snapshot, SaveLocation } from '@shared/types';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';

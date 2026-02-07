@@ -58,14 +58,6 @@ export function removeSaveLocation(db: AppDb, id: string): void {
   }
 }
 
-export function resolveSaveLocationType(locationPath: string): SaveLocationType {
-  if (fs.existsSync(locationPath)) {
-    const stats = fs.statSync(locationPath);
-    if (stats.isFile()) return 'file';
-  }
-  return 'folder';
-}
-
 export function normalizeLocationPath(locationPath: string): string {
   return path.normalize(locationPath);
 }

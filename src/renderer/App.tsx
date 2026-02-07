@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Maximize2, Minimize2, Plus, Proportions, RefreshCw, Settings2, Square, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Plus, Proportions, RefreshCw, Settings2, X } from 'lucide-react';
 import { BackupScanResult, Game, GameDetail, GameSummary, Settings, StartupState } from '@shared/types';
 import AddGamePanel from './components/AddGamePanel';
 import SettingsPanel from './components/SettingsPanel';
@@ -41,7 +41,6 @@ export default function App() {
 	const [games, setGames] = useState<GameSummary[]>([]);
 	const [selectedDetail, setSelectedDetail] = useState<GameDetail | null>(null);
 	const [settings, setSettings] = useState<Settings>(emptySettings);
-	const [isMaximized, setIsMaximized] = useState(false);
 	const [restartRequired, setRestartRequired] = useState(false);
 	const [layoutMode, setLayoutMode] = useState<LayoutMode>('normal');
 	const [showStartupScanPrompt, setShowStartupScanPrompt] = useState(true);
@@ -103,16 +102,9 @@ export default function App() {
 		});
 
 		window.gamesaver.windowControls
-			.isMaximized()
-			.then(setIsMaximized)
-			.catch(() => undefined);
-		window.gamesaver.windowControls
 			.getLayoutMode()
 			.then(setLayoutMode)
 			.catch(() => undefined);
-		const unsubscribeWindow = window.gamesaver.windowControls.onWindowState((payload) => {
-			setIsMaximized(payload.isMaximized);
-		});
 
 		const unsubscribeRestart = window.gamesaver.onRestartRequired(() => {
 			setRestartRequired(true);
@@ -121,7 +113,6 @@ export default function App() {
 		return () => {
 			disposed = true;
 			unsubscribe();
-			unsubscribeWindow();
 			unsubscribeRestart();
 		};
 	}, []);
