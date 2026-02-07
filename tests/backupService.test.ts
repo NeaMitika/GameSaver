@@ -1,6 +1,7 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryDb } from '../src/main/services/db';
 import { Settings } from '../src/shared/types';
 
@@ -40,6 +41,7 @@ import { backupGame } from '../src/main/services/backupService';
 import { logEvent } from '../src/main/services/eventLogService';
 import { removeDirSafe, walkFiles } from '../src/main/services/fileOps';
 import { updateGameStatus } from '../src/main/services/gameService';
+import { hashFile } from '../src/main/services/hash';
 import { listSaveLocations } from '../src/main/services/saveLocationService';
 import { getSnapshotRoot } from '../src/main/services/storage';
 
@@ -51,9 +53,20 @@ const settings: Settings = {
   dataRoot: path.join('tmp', 'data')
 };
 
+const tempRoots: string[] = [];
+
 describe('backupService', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    while (tempRoots.length > 0) {
+      const next = tempRoots.pop();
+      if (!next) continue;
+      fs.rmSync(next, { recursive: true, force: true });
+    }
   });
 
   it('marks warning and skips when no enabled save locations exist', async () => {
@@ -123,5 +136,135 @@ describe('backupService', () => {
       'Backup skipped: no files found in enabled save locations.'
     );
     expect(removeDirSafe).toHaveBeenCalledWith(path.join('tmp', 'snapshot-root'));
+  });
+
+  it('fails and rolls back when writing the snapshot manifest fails', async () => {
+    vi.mocked(listSaveLocations).mockReturnValue([
+      {
+        id: 'loc-1',
+        game_id: 'game-1',
+        path: 'C:\\Saves\\profile.sav',
+        type: 'file',
+        auto_detected: false,
+        enabled: true,
+        exists: true
+      }
+    ]);
+    const existsSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    const statSpy = vi.spyOn(fs.promises, 'stat').mockResolvedValue({ size: 12 } as fs.Stats);
+    const writeSpy = vi.spyOn(fs.promises, 'writeFile').mockRejectedValue(new Error('disk full'));
+    vi.mocked(hashFile).mockResolvedValue('file-checksum');
+
+    const db = createMemoryDb({
+      games: [
+        {
+          id: 'game-1',
+          name: 'Game One',
+          install_path: 'C:\\Games\\One',
+          exe_path: 'C:\\Games\\One\\one.exe',
+          created_at: new Date().toISOString(),
+          last_seen_at: null,
+          status: 'protected',
+          folder_name: 'game-1'
+        }
+      ]
+    });
+
+    await expect(backupGame(db, settings, 'game-1', 'manual')).rejects.toThrow('disk full');
+    expect(db.state.snapshots).toHaveLength(0);
+    expect(db.state.snapshotFiles).toHaveLength(0);
+    expect(removeDirSafe).toHaveBeenCalledWith(path.join('tmp', 'snapshot-root'));
+
+    existsSpy.mockRestore();
+    statSpy.mockRestore();
+    writeSpy.mockRestore();
+  });
+
+  it('rejects verification when snapshot manifest is missing', async () => {
+    const snapshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-snapshot-missing-manifest-'));
+    tempRoots.push(snapshotRoot);
+    const db = createMemoryDb({
+      snapshots: [
+        {
+          id: 'snap-1',
+          game_id: 'game-1',
+          created_at: new Date().toISOString(),
+          size_bytes: 1,
+          checksum: 'snapshot-checksum',
+          storage_path: snapshotRoot,
+          reason: 'manual'
+        }
+      ],
+      snapshotFiles: [
+        {
+          id: 'file-1',
+          snapshot_id: 'snap-1',
+          location_id: 'loc-1',
+          relative_path: 'save.sav',
+          size_bytes: 1,
+          checksum: 'file-checksum'
+        }
+      ]
+    });
+
+    const { verifySnapshot } = await import('../src/main/services/backupService');
+    await expect(verifySnapshot(db, 'snap-1')).rejects.toThrow('Snapshot manifest is missing or invalid.');
+  });
+
+  it('blocks verification when manifest paths escape snapshot root', async () => {
+    const snapshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-snapshot-traversal-'));
+    tempRoots.push(snapshotRoot);
+    fs.writeFileSync(
+      path.join(snapshotRoot, 'snapshot.manifest.json'),
+      JSON.stringify(
+        {
+          version: 2,
+          snapshot_id: 'snap-1',
+          created_at: new Date().toISOString(),
+          reason: 'manual',
+          locations: {
+            'loc-1': {
+              path: 'C:\\Saves',
+              type: 'folder',
+              auto_detected: false,
+              enabled: true,
+              storage_folder: '..\\..\\outside'
+            }
+          }
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const db = createMemoryDb({
+      snapshots: [
+        {
+          id: 'snap-1',
+          game_id: 'game-1',
+          created_at: new Date().toISOString(),
+          size_bytes: 1,
+          checksum: 'snapshot-checksum',
+          storage_path: snapshotRoot,
+          reason: 'manual'
+        }
+      ],
+      snapshotFiles: [
+        {
+          id: 'file-1',
+          snapshot_id: 'snap-1',
+          location_id: 'loc-1',
+          relative_path: 'save.sav',
+          size_bytes: 1,
+          checksum: 'file-checksum'
+        }
+      ]
+    });
+
+    const { verifySnapshot } = await import('../src/main/services/backupService');
+    await expect(verifySnapshot(db, 'snap-1')).rejects.toThrow(
+      'Snapshot file path resolves outside its allowed root.'
+    );
   });
 });

@@ -269,10 +269,10 @@ export async function backupGame(
       reason
     };
 
+    await writeSnapshotManifest(snapshotRoot, snapshot, locations, locationStorageFolders);
     db.state.snapshots.push(snapshot);
     db.state.snapshotFiles.push(...snapshotFiles);
     persistDb(db);
-    await writeSnapshotManifest(snapshotRoot, snapshot, locations, locationStorageFolders);
 
     if (!options.skipRetention) {
       await applyRetentionPolicy(db, settings, gameId);
@@ -302,6 +302,9 @@ export async function restoreSnapshot(db: AppDb, settings: Settings, snapshotId:
   const locationMap = new Map(saveLocations.map((loc) => [loc.id, loc]));
   const files = db.state.snapshotFiles.filter((item) => item.snapshot_id === snapshotId);
   const manifest = await readSnapshotManifest(snapshot.storage_path);
+  if (!manifest) {
+    throw new Error('Snapshot manifest is missing or invalid.');
+  }
 
   await backupGame(db, settings, gameId, 'pre-restore', { skipRetention: true });
 
@@ -317,7 +320,8 @@ export async function restoreSnapshot(db: AppDb, settings: Settings, snapshotId:
     }
 
     const destRoot = location.type === 'file' ? path.dirname(location.path) : location.path;
-    const destPath = path.join(destRoot, file.relative_path);
+    const destPath = path.resolve(destRoot, file.relative_path);
+    assertPathWithinRoot(destRoot, destPath, 'Restore destination path');
     await copyFileWithRetries(sourcePath, destPath, 3);
   }
 
@@ -348,6 +352,9 @@ export async function verifySnapshot(db: AppDb, snapshotId: string): Promise<Ver
 
   const files = db.state.snapshotFiles.filter((item) => item.snapshot_id === snapshotId);
   const manifest = await readSnapshotManifest(snapshot.storage_path);
+  if (!manifest) {
+    throw new Error('Snapshot manifest is missing or invalid.');
+  }
   let issues = 0;
   for (const file of files) {
     const absolutePath = resolveSnapshotFileAbsolutePath(snapshot.storage_path, file, manifest);
@@ -480,11 +487,7 @@ async function writeSnapshotManifest(
     };
   }
   const manifestPath = path.join(snapshotRoot, SNAPSHOT_MANIFEST_FILE_NAME);
-  try {
-    await fs.promises.writeFile(manifestPath, JSON.stringify(payload, null, 2), 'utf-8');
-  } catch {
-    // Manifest is optional and should not fail backup creation.
-  }
+  await fs.promises.writeFile(manifestPath, JSON.stringify(payload, null, 2), 'utf-8');
 }
 
 async function readSnapshotManifest(snapshotRoot: string): Promise<SnapshotManifestPayload | null> {
@@ -780,11 +783,28 @@ function ensureUniqueFolderName(base: string, used: Set<string>): string {
 function resolveSnapshotFileAbsolutePath(
   snapshotRoot: string,
   file: SnapshotFile,
-  manifest: SnapshotManifestPayload | null
+  manifest: SnapshotManifestPayload
 ): string {
   const storageFolder = manifest?.locations?.[file.location_id]?.storage_folder;
   if (!storageFolder || storageFolder.trim().length === 0) {
     throw new Error(`Snapshot manifest is missing storage mapping for location "${file.location_id}".`);
   }
-  return path.join(snapshotRoot, storageFolder, file.relative_path);
+  const absolutePath = path.resolve(snapshotRoot, storageFolder, file.relative_path);
+  assertPathWithinRoot(snapshotRoot, absolutePath, 'Snapshot file path');
+  return absolutePath;
+}
+
+function assertPathWithinRoot(rootPath: string, targetPath: string, context: string): void {
+  const normalizedRoot = normalizePathForKey(rootPath);
+  const normalizedTarget = normalizePathForKey(targetPath);
+  const normalizedRootWithSeparator = normalizedRoot.endsWith(path.sep)
+    ? normalizedRoot
+    : `${normalizedRoot}${path.sep}`;
+  if (
+    normalizedTarget === normalizedRoot ||
+    normalizedTarget.startsWith(normalizedRootWithSeparator)
+  ) {
+    return;
+  }
+  throw new Error(`${context} resolves outside its allowed root.`);
 }

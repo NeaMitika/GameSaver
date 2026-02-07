@@ -428,11 +428,12 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 function parseWindowsPathFromErrorMessage(message: string): string | null {
-	const match = message.match(/[A-Za-z]:\\[^'"\\r\\n]*/);
-	if (!match) {
+	const quotedMatch = message.match(/['"]([A-Za-z]:\\[^'"\r\n]+)['"]/);
+	const rawPath = quotedMatch?.[1] ?? message.match(/[A-Za-z]:\\[^'"\r\n]*/)?.[0];
+	if (!rawPath) {
 		return null;
 	}
-	return match[0].trim().replace(/[\\/]+$/, '');
+	return rawPath.trim().replace(/[\\/]+$/, '');
 }
 
 function inferDataRootFromMissingPath(missingPath: string): string {
