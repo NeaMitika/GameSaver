@@ -47,11 +47,6 @@ export default function GameRow({ game, onOpenDetail, onBackupNow }: GameRowProp
 						<span className='text-muted-foreground'>Backup</span>
 						<span className='font-medium'>{game.last_backup_at ? formatDate(game.last_backup_at) : 'Never'}</span>
 					</div>
-
-					<div className='inline-flex items-center gap-1.5 whitespace-nowrap'>
-						<span className='text-muted-foreground'>Issues</span>
-						<span className='font-medium'>{game.issue_count}</span>
-					</div>
 				</div>
 
 				<div className='flex items-center gap-2 lg:ml-auto'>

@@ -9,8 +9,8 @@ function cspMetaPlugin(mode: string) {
     transformIndexHtml(html: string) {
       const isDev = mode === 'development';
       const csp = isDev
-        ? "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:5175 ws://localhost:5175;"
-        : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self';";
+        ? "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:5175 ws://localhost:5175;"
+        : "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self';";
       return html.replace(
         /<meta http-equiv=\"Content-Security-Policy\"[^>]*>/,
         `<meta http-equiv=\"Content-Security-Policy\" content=\"${csp}\" />`
