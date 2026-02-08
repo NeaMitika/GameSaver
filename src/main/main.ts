@@ -67,6 +67,40 @@ const WIDGET_WINDOW_SIZE = {
 
 const TRAY_ICON_FALLBACK_PNG_BASE64 =
 	'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAABVSURBVDhPY/C61/CfEjxqAIkG8ItrYYgRbQBIMwwji5NsALo4VgPQFeLSDMIYBsAUwzSg89ExThegY2zqQBhnGBCjGYTxBiIhzSCM1wBi8EAb0PAfAKENht+Oa+oNAAAAAElFTkSuQmCC';
+const DEV_SERVER_ORIGIN = 'http://localhost:5175';
+
+function buildContentSecurityPolicy(isDev: boolean): string {
+	const baseDirectives = [
+		"default-src 'self'",
+		"base-uri 'self'",
+		"form-action 'self'",
+		"frame-ancestors 'none'",
+		"object-src 'none'",
+		"img-src 'self' data:",
+		"font-src 'self' data:",
+		"style-src 'self' 'unsafe-inline'",
+	];
+	if (isDev) {
+		return [
+			...baseDirectives,
+			"script-src 'self' 'unsafe-inline'",
+			`connect-src 'self' ${DEV_SERVER_ORIGIN} ws://localhost:5175`,
+		].join('; ');
+	}
+	return [...baseDirectives, "script-src 'self'", "connect-src 'self'"].join('; ');
+}
+
+function isAllowedAppNavigation(urlValue: string, isDev: boolean): boolean {
+	try {
+		const url = new URL(urlValue);
+		if (url.protocol === 'file:') {
+			return true;
+		}
+		return isDev && url.origin === DEV_SERVER_ORIGIN;
+	} catch {
+		return false;
+	}
+}
 
 function normalizeTrayIcon(image: NativeImage): NativeImage {
 	return image.resize({ width: 16, height: 16 });
@@ -89,6 +123,27 @@ function getTrayIconPathCandidates(): string[] {
 		process.resourcesPath,
 	];
 	return directories.flatMap((directory) => fileNames.map((fileName) => path.join(directory, fileName)));
+}
+
+function resolveWindowIconPath(): string | undefined {
+	const fileNames = ['icon.ico', 'icon.png'];
+	const directories = [
+		path.join(process.cwd(), 'build'),
+		path.join(app.getAppPath(), 'build'),
+		path.join(process.resourcesPath, 'build'),
+		process.resourcesPath,
+	];
+
+	for (const directory of directories) {
+		for (const fileName of fileNames) {
+			const iconPath = path.join(directory, fileName);
+			if (fs.existsSync(iconPath)) {
+				return iconPath;
+			}
+		}
+	}
+
+	return undefined;
 }
 
 async function resolveTrayIcon(): Promise<NativeImage> {
@@ -268,6 +323,7 @@ function createWindow(): void {
 	mainWindow = new BrowserWindow({
 		width: NORMAL_WINDOW_DEFAULT_SIZE.width,
 		height: NORMAL_WINDOW_DEFAULT_SIZE.height,
+		icon: resolveWindowIconPath(),
 		resizable: true,
 		maximizable: true,
 		autoHideMenuBar: true,
@@ -279,6 +335,7 @@ function createWindow(): void {
 			nodeIntegration: false,
 			sandbox: true,
 			webSecurity: true,
+			allowRunningInsecureContent: false,
 		},
 	});
 	mainWindow.setMinimumSize(NORMAL_WINDOW_MIN_SIZE.width, NORMAL_WINDOW_MIN_SIZE.height);
@@ -286,7 +343,7 @@ function createWindow(): void {
 	if (app.isPackaged) {
 		mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 	} else {
-		mainWindow.loadURL('http://localhost:5175');
+		mainWindow.loadURL(DEV_SERVER_ORIGIN);
 		mainWindow.webContents.openDevTools({ mode: 'detach' });
 	}
 
@@ -316,14 +373,23 @@ function createWindow(): void {
 
 function setupSecurity(): void {
 	const isDev = !app.isPackaged;
-	const csp = isDev
-		? "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://localhost:5175 ws://localhost:5175;"
-		: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';";
+	const csp = buildContentSecurityPolicy(isDev);
 
 	session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+		if (details.resourceType !== 'mainFrame' || !isAllowedAppNavigation(details.url, isDev)) {
+			callback({ responseHeaders: details.responseHeaders });
+			return;
+		}
+
+		const responseHeaders: Record<string, string[] | undefined> = {
+			...details.responseHeaders,
+		};
+		delete responseHeaders['content-security-policy'];
+		delete responseHeaders['Content-Security-Policy'];
+
 		callback({
 			responseHeaders: {
-				...details.responseHeaders,
+				...responseHeaders,
 				'Content-Security-Policy': [csp],
 			},
 		});
@@ -331,6 +397,14 @@ function setupSecurity(): void {
 
 	app.on('web-contents-created', (_event, contents) => {
 		contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+		contents.on('will-attach-webview', (event) => {
+			event.preventDefault();
+		});
+		contents.on('will-navigate', (event, navigationUrl) => {
+			if (!isAllowedAppNavigation(navigationUrl, isDev)) {
+				event.preventDefault();
+			}
+		});
 	});
 }
 
@@ -427,6 +501,40 @@ function getErrorMessage(error: unknown, fallback: string): string {
 		return error;
 	}
 	return fallback;
+}
+
+type SaveLocationDialogTarget = 'file' | 'folder';
+
+async function showSaveLocationOpenDialog(target: SaveLocationDialogTarget): Promise<string | null> {
+	const properties: Array<'openFile' | 'openDirectory'> = [
+		target === 'file' ? 'openFile' : 'openDirectory',
+	];
+	const result = await dialog.showOpenDialog({
+		properties,
+	});
+	return result.canceled ? null : result.filePaths[0] ?? null;
+}
+
+async function pickSaveLocationPath(): Promise<string | null> {
+	const messageBoxOptions: Electron.MessageBoxOptions = {
+		type: 'question',
+		title: 'Add Save Location',
+		message: 'Select what you want to back up.',
+		detail: 'Choose File for a single save file, or Folder for a save directory.',
+		buttons: ['File', 'Folder', 'Cancel'],
+		defaultId: 0,
+		cancelId: 2,
+		noLink: true,
+	};
+	const choice = mainWindow
+		? await dialog.showMessageBox(mainWindow, messageBoxOptions)
+		: await dialog.showMessageBox(messageBoxOptions);
+
+	if (choice.response === 2) {
+		return null;
+	}
+
+	return await showSaveLocationOpenDialog(choice.response === 0 ? 'file' : 'folder');
 }
 
 function parseWindowsPathFromErrorMessage(message: string): string | null {
@@ -757,17 +865,11 @@ function registerIpc(): void {
 	});
 
 	ipcMain.handle('dialog:pickFolder', async () => {
-		const result = await dialog.showOpenDialog({
-			properties: ['openDirectory'],
-		});
-		return result.canceled ? null : result.filePaths[0];
+		return await showSaveLocationOpenDialog('folder');
 	});
 
 	ipcMain.handle('dialog:pickSaveLocation', async () => {
-		const result = await dialog.showOpenDialog({
-			properties: ['openFile', 'openDirectory'],
-		});
-		return result.canceled ? null : result.filePaths[0];
+		return await pickSaveLocationPath();
 	});
 }
 
