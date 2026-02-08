@@ -1,56 +1,32 @@
-import React, { useState } from 'react';
-import { Settings } from '@shared/types';
+import type { Settings } from '@shared/types';
+import { useSettingsPanel } from '@renderer/hooks/useSettingsPanel';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 
-interface SettingsPanelProps {
+type SettingsPanelProps = {
   settings: Settings;
   onCancel: () => void;
   onError: (message: string) => void;
   onSaved: (settings: Settings) => void;
-}
+};
 
 export default function SettingsPanel({ settings, onCancel, onError, onSaved }: SettingsPanelProps) {
-  const [backupFrequencyMinutes, setBackupFrequencyMinutes] = useState(settings.backupFrequencyMinutes);
-  const [retentionCount, setRetentionCount] = useState(settings.retentionCount);
-  const [storageRoot, setStorageRoot] = useState(settings.storageRoot);
-  const [dataRoot, setDataRoot] = useState(settings.dataRoot);
-  const [busy, setBusy] = useState(false);
-
-  const pickStorageRoot = async () => {
-    const result = await window.gamesaver.pickFolder();
-    if (result) {
-      setStorageRoot(result);
-    }
-  };
-
-  const pickDataRoot = async () => {
-    const result = await window.gamesaver.pickFolder();
-    if (result) {
-      setDataRoot(result);
-      setStorageRoot(`${result}\\Backups`);
-    }
-  };
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    try {
-      const next = await window.gamesaver.updateSettings({
-        backupFrequencyMinutes: Number(backupFrequencyMinutes),
-        retentionCount: Number(retentionCount),
-        storageRoot,
-        dataRoot
-      });
-      onSaved(next);
-    } catch (error) {
-      onError(getErrorMessage(error, 'Failed to save settings.'));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const {
+    backupFrequencyMinutes,
+    setBackupFrequencyMinutes,
+    retentionCount,
+    setRetentionCount,
+    storageRoot,
+    setStorageRoot,
+    dataRoot,
+    setDataRoot,
+    busy,
+    pickStorageRoot,
+    pickDataRoot,
+    handleSubmit
+  } = useSettingsPanel({ settings, onError, onSaved });
 
   return (
     <Card>
@@ -131,14 +107,4 @@ export default function SettingsPanel({ settings, onCancel, onError, onSaved }: 
       </CardContent>
     </Card>
   );
-}
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  if (typeof error === 'string' && error.trim().length > 0) {
-    return error;
-  }
-  return fallback;
 }

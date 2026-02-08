@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { GameDetail, Snapshot, SaveLocation } from '@shared/types';
+import type { GameDetail } from '@shared/types';
+import { useGameDetailActions } from '@renderer/hooks/useGameDetailActions';
+import { formatBytes, formatDate } from '@renderer/lib/format';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { cn } from '@renderer/lib/utils';
 
-interface GameDetailPanelProps {
+type GameDetailPanelProps = {
   detail: GameDetail;
   isRunning: boolean;
   onBack: () => void;
@@ -13,7 +14,7 @@ interface GameDetailPanelProps {
   onRemove: () => void;
   onError: (message: string) => void;
   onSuccess: (message: string) => void;
-}
+};
 
 export default function GameDetailPanel({
   detail,
@@ -24,117 +25,24 @@ export default function GameDetailPanel({
   onError,
   onSuccess
 }: GameDetailPanelProps) {
-  const [busySnapshot, setBusySnapshot] = useState<string | null>(null);
-
-  const handleLaunch = async () => {
-    try {
-      await window.gamesaver.launchGame(detail.game.id);
-      onSuccess('Game launch requested.');
-    } catch (error) {
-      onError(getErrorMessage(error, 'Failed to launch the game.'));
-    }
-  };
-
-  const handleBackup = async () => {
-    try {
-      await window.gamesaver.backupNow(detail.game.id);
-      await onRefresh();
-      onSuccess('Backup request completed.');
-    } catch (error) {
-      onError(getErrorMessage(error, 'Failed to back up this game.'));
-    }
-  };
-
-  const handleAddLocation = async () => {
-    try {
-      const picked = await window.gamesaver.pickSaveLocation();
-      if (picked) {
-        await window.gamesaver.addSaveLocation(detail.game.id, picked);
-        await onRefresh();
-        onSuccess('Save location added.');
-      }
-    } catch (error) {
-      onError(getErrorMessage(error, 'Failed to add save location.'));
-    }
-  };
-
-  const handleToggle = async (location: SaveLocation) => {
-    try {
-      await window.gamesaver.toggleSaveLocation(location.id, !location.enabled);
-      await onRefresh();
-      onSuccess(`Save location ${location.enabled ? 'disabled' : 'enabled'}.`);
-    } catch (error) {
-      onError(getErrorMessage(error, 'Failed to update save location.'));
-    }
-  };
-
-  const handleRemoveLocation = async (location: SaveLocation) => {
-    const confirmed = confirm('Remove this save location? It will no longer be backed up.');
-    if (!confirmed) return;
-    try {
-      await window.gamesaver.removeSaveLocation(location.id);
-      await onRefresh();
-      onSuccess('Save location removed.');
-    } catch (error) {
-      onError(getErrorMessage(error, 'Failed to remove save location.'));
-    }
-  };
-
-  const handleRestore = async (snapshot: Snapshot) => {
-    setBusySnapshot(snapshot.id);
-    try {
-      await window.gamesaver.restoreSnapshot(snapshot.id);
-      await onRefresh();
-      onSuccess('Snapshot restored.');
-    } catch (error) {
-      onError(getErrorMessage(error, 'Failed to restore snapshot.'));
-    } finally {
-      setBusySnapshot(null);
-    }
-  };
-
-  const handleDeleteSnapshot = async (snapshot: Snapshot) => {
-    const confirmed = confirm('Delete this snapshot? This cannot be undone.');
-    if (!confirmed) return;
-    setBusySnapshot(snapshot.id);
-    try {
-      await window.gamesaver.deleteSnapshot(snapshot.id);
-      await onRefresh();
-      onSuccess('Snapshot deleted.');
-    } catch (error) {
-      onError(getErrorMessage(error, 'Failed to delete snapshot.'));
-    } finally {
-      setBusySnapshot(null);
-    }
-  };
-
-  const handleVerify = async (snapshot: Snapshot) => {
-    setBusySnapshot(snapshot.id);
-    try {
-      const result = await window.gamesaver.verifySnapshot(snapshot.id);
-      if (result.ok) {
-        onSuccess('Snapshot verified.');
-      } else {
-        onError(`Snapshot has ${result.issues} issue(s).`);
-      }
-    } catch (error) {
-      onError(getErrorMessage(error, 'Failed to verify snapshot.'));
-    } finally {
-      setBusySnapshot(null);
-    }
-  };
-
-  const handleRemove = async () => {
-    const confirmed = confirm('Remove this game from GameSaver? Backups will be deleted.');
-    if (!confirmed) return;
-    try {
-      await window.gamesaver.removeGame(detail.game.id);
-      onRemove();
-      onSuccess('Game removed.');
-    } catch (error) {
-      onError(getErrorMessage(error, 'Failed to remove game.'));
-    }
-  };
+  const {
+    busySnapshot,
+    handleLaunch,
+    handleBackup,
+    handleAddLocation,
+    handleToggle,
+    handleRemoveLocation,
+    handleRestore,
+    handleDeleteSnapshot,
+    handleVerify,
+    handleRemove
+  } = useGameDetailActions({
+    detail,
+    onRefresh,
+    onRemove,
+    onError,
+    onSuccess
+  });
 
   return (
     <div className="space-y-4">
@@ -303,13 +211,15 @@ export default function GameDetailPanel({
   );
 }
 
-function getEventLogStyle(type: 'backup' | 'restore' | 'error'): {
+type EventLogStyle = {
   label: string;
   row: string;
   chip: string;
   symbol: string;
   message: string;
-} {
+};
+
+function getEventLogStyle(type: 'backup' | 'restore' | 'error'): EventLogStyle {
   if (type === 'error') {
     return {
       label: 'ERR',
@@ -335,30 +245,4 @@ function getEventLogStyle(type: 'backup' | 'restore' | 'error'): {
     symbol: 'text-emerald-400',
     message: 'text-emerald-100'
   };
-}
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  return new Intl.DateTimeFormat('en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short'
-  }).format(date);
-}
-
-function formatBytes(value: number): string {
-  if (value === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(value) / Math.log(k));
-  return `${(value / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-}
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  if (typeof error === 'string' && error.trim().length > 0) {
-    return error;
-  }
-  return fallback;
 }

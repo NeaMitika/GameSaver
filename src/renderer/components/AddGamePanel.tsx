@@ -1,64 +1,19 @@
-import React, { useState } from 'react';
-import { AddGamePayload, Game } from '@shared/types';
+import type { Game } from '@shared/types';
+import { useAddGamePanel } from '@renderer/hooks/useAddGamePanel';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 
-interface AddGamePanelProps {
+type AddGamePanelProps = {
   onCancel: () => void;
   onCreated: (game: Game) => void;
   onError: (message: string) => void;
-}
+};
 
 export default function AddGamePanel({ onCancel, onCreated, onError }: AddGamePanelProps) {
-  const [name, setName] = useState('');
-  const [exePath, setExePath] = useState('');
-  const [installPath, setInstallPath] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const pickExe = async () => {
-    const result = await window.gamesaver.pickExe();
-    if (result) {
-      setExePath(result);
-      if (!name) {
-        const base = result.split('\\').pop()?.replace(/\.exe$/i, '') ?? '';
-        setName(base);
-      }
-      if (!installPath) {
-        const folder = result.split('\\').slice(0, -1).join('\\');
-        setInstallPath(folder);
-      }
-    }
-  };
-
-  const pickInstall = async () => {
-    const result = await window.gamesaver.pickFolder();
-    if (result) {
-      setInstallPath(result);
-    }
-  };
-
-  const canSubmit = name.trim().length > 1 && exePath.trim().length > 0 && installPath.trim().length > 0;
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!canSubmit) return;
-    setBusy(true);
-    try {
-      const payload: AddGamePayload = {
-        name: name.trim(),
-        exePath,
-        installPath
-      };
-      const game = await window.gamesaver.addGame(payload);
-      onCreated(game);
-    } catch (error) {
-      onError(getErrorMessage(error, 'Failed to add game.'));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { name, setName, exePath, setExePath, installPath, setInstallPath, busy, canSubmit, pickExe, pickInstall, handleSubmit } =
+    useAddGamePanel({ onCreated, onError });
 
   return (
     <Card>
@@ -128,14 +83,4 @@ export default function AddGamePanel({ onCancel, onCreated, onError }: AddGamePa
       </CardContent>
     </Card>
   );
-}
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  if (typeof error === 'string' && error.trim().length > 0) {
-    return error;
-  }
-  return fallback;
 }
