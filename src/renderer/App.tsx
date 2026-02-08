@@ -279,6 +279,9 @@ export default function App() {
 					</div>
 
 					<div className='app-no-drag flex items-center gap-1'>
+						<Button variant='ghost' size='icon' disabled={isScanningBackups} onClick={() => void handleScanBackups()}>
+							<RefreshCw className={isScanningBackups ? 'animate-spin' : ''} />
+						</Button>
 						{!isRecoveryMode && (
 							<Button variant='ghost' size='icon' aria-label='Widget mode' onClick={() => void toggleLayoutMode()}>
 								<Proportions />
@@ -300,7 +303,10 @@ export default function App() {
 				{isRecoveryMode && (
 					<div className='flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm'>
 						<span>
-							Recovery mode: {startupState.missingPath ? `Could not access ${startupState.missingPath}.` : 'Saved data path is unavailable.'}
+							Recovery mode:{' '}
+							{startupState.missingPath
+								? `Could not access ${startupState.missingPath}.`
+								: 'Saved data path is unavailable.'}
 						</span>
 						<Button variant='outline' size='sm' onClick={() => setScreen('settings')}>
 							Open Settings
@@ -314,31 +320,6 @@ export default function App() {
 						<Button variant='outline' size='sm' onClick={() => window.gamesaver.relaunchApp()}>
 							Restart Now
 						</Button>
-					</div>
-				)}
-
-				{showStartupScanPrompt && !isRecoveryMode && (
-					<div className='flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm'>
-						<span>Check GameSaverData backups and sync the database?</span>
-						<div className='flex items-center gap-2'>
-							<Button
-								variant='outline'
-								size='sm'
-								disabled={isScanningBackups}
-								onClick={() => void handleScanBackups()}
-							>
-								<RefreshCw className={isScanningBackups ? 'animate-spin' : ''} />
-								Scan Backups
-							</Button>
-							<Button
-								variant='ghost'
-								size='sm'
-								disabled={isScanningBackups}
-								onClick={() => setShowStartupScanPrompt(false)}
-							>
-								Later
-							</Button>
-						</div>
 					</div>
 				)}
 
