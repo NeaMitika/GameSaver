@@ -1,11 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   AddGamePayload,
+  BackupProgressPayload,
   BackupScanResult,
   Game,
   GameDetail,
   GameSummary,
   Settings,
+  SnapshotCreatedPayload,
   StartupState,
   VerifyResult,
   SaveLocation
@@ -39,6 +41,20 @@ const api = {
     };
     ipcRenderer.on('games:status', handler);
     return () => ipcRenderer.removeListener('games:status', handler);
+  },
+  onBackupCreated: (callback: (payload: SnapshotCreatedPayload) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: SnapshotCreatedPayload) => {
+      callback(payload);
+    };
+    ipcRenderer.on('backup:created', handler);
+    return () => ipcRenderer.removeListener('backup:created', handler);
+  },
+  onBackupProgress: (callback: (payload: BackupProgressPayload) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: BackupProgressPayload) => {
+      callback(payload);
+    };
+    ipcRenderer.on('backup:progress', handler);
+    return () => ipcRenderer.removeListener('backup:progress', handler);
   },
   windowControls: {
     minimize: (): Promise<void> => ipcRenderer.invoke('window:minimize'),

@@ -2,11 +2,13 @@
 
 import type {
   AddGamePayload,
+  BackupProgressPayload,
   BackupScanResult,
   Game,
   GameDetail,
   GameSummary,
   Settings,
+  SnapshotCreatedPayload,
   StartupState,
   VerifyResult,
   SaveLocation
@@ -34,6 +36,8 @@ declare global {
       pickFolder: () => Promise<string | null>;
       pickSaveLocation: () => Promise<string | null>;
       onGameStatus: (callback: (payload: { gameId: string; isRunning: boolean }) => void) => () => void;
+      onBackupCreated: (callback: (payload: SnapshotCreatedPayload) => void) => () => void;
+      onBackupProgress: (callback: (payload: BackupProgressPayload) => void) => () => void;
       windowControls: {
         minimize: () => Promise<void>;
         toggleMaximize: () => Promise<boolean>;

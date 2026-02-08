@@ -10,10 +10,12 @@ import { listGames, addGame, getGameDetail, removeGame, getStoredGameById } from
 import { addSaveLocation, toggleSaveLocation, removeSaveLocation } from './services/saveLocationService';
 import {
 	backupGame,
+	onBackupProgress,
 	restoreSnapshot,
 	verifySnapshot,
 	deleteSnapshot,
 	scanSnapshotsFromDisk,
+	onSnapshotCreated,
 } from './services/backupService';
 import { startWatcher, refreshWatcher } from './services/watcherService';
 import {
@@ -636,14 +638,34 @@ function registerIpc(): void {
 		const payload = parseSaveLocationAddPayload(payloadValue);
 		const location = addSaveLocation(activeDb, payload.gameId, payload.path, false);
 		refreshWatcher(activeDb, settings);
+		backupGame(activeDb, settings, location.game_id, 'auto').catch((error) => {
+			logEvent(
+				activeDb,
+				location.game_id,
+				'error',
+				`Auto backup after save-location add failed: ${getErrorMessage(error, 'Unknown error')}`
+			);
+		});
 		return location;
 	});
 
 	ipcMain.handle('savelocations:toggle', (_event, payloadValue: unknown) => {
 		const activeDb = getRequiredDb();
 		const payload = parseTogglePayload(payloadValue);
+		const location = activeDb.state.saveLocations.find((item) => item.id === payload.id);
+		const shouldTriggerBackup = Boolean(location && !location.enabled && payload.enabled);
 		toggleSaveLocation(activeDb, payload.id, payload.enabled);
 		refreshWatcher(activeDb, settings);
+		if (shouldTriggerBackup && location) {
+			backupGame(activeDb, settings, location.game_id, 'auto').catch((error) => {
+				logEvent(
+					activeDb,
+					location.game_id,
+					'error',
+					`Auto backup after save-location enable failed: ${getErrorMessage(error, 'Unknown error')}`
+				);
+			});
+		}
 	});
 
 	ipcMain.handle('savelocations:remove', (_event, payloadValue: unknown) => {
@@ -773,6 +795,18 @@ app.whenReady().then(() => {
 	onSessionStatus((payload) => {
 		if (mainWindow) {
 			mainWindow.webContents.send('games:status', payload);
+		}
+	});
+
+	onSnapshotCreated((payload) => {
+		if (mainWindow) {
+			mainWindow.webContents.send('backup:created', payload);
+		}
+	});
+
+	onBackupProgress((payload) => {
+		if (mainWindow) {
+			mainWindow.webContents.send('backup:progress', payload);
 		}
 	});
 

@@ -97,3 +97,26 @@ export interface BackupScanResult {
   skippedUnknownGames: number;
   skippedInvalidSnapshots: number;
 }
+
+export interface SnapshotCreatedPayload {
+  gameId: string;
+  snapshotId: string;
+  reason: SnapshotReason;
+  createdAt: string;
+}
+
+export type BackupProgressStage = 'started' | 'progress' | 'completed' | 'failed';
+
+export interface BackupProgressPayload {
+  gameId: string;
+  reason: SnapshotReason;
+  stage: BackupProgressStage;
+  totalFiles: number;
+  completedFiles: number;
+  totalBytes: number;
+  copiedBytes: number;
+  percent: number;
+  snapshotId: string | null;
+  createdAt: string | null;
+  message: string | null;
+}

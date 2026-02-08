@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryDb } from '../src/main/services/db';
-import { Settings } from '../src/shared/types';
+import { BackupProgressPayload, Settings } from '../src/shared/types';
 
 vi.mock('../src/main/services/saveLocationService', () => ({
   listSaveLocations: vi.fn()
@@ -37,7 +37,7 @@ vi.mock('../src/main/services/gameService', () => ({
   )
 }));
 
-import { backupGame, deleteSnapshot, restoreSnapshot } from '../src/main/services/backupService';
+import { backupGame, deleteSnapshot, onBackupProgress, restoreSnapshot } from '../src/main/services/backupService';
 import { logEvent } from '../src/main/services/eventLogService';
 import { removeDirSafe, walkFiles } from '../src/main/services/fileOps';
 import { updateGameStatus } from '../src/main/services/gameService';
@@ -174,6 +174,75 @@ describe('backupService', () => {
     expect(db.state.snapshots).toHaveLength(0);
     expect(db.state.snapshotFiles).toHaveLength(0);
     expect(removeDirSafe).toHaveBeenCalledWith(path.join('tmp', 'snapshot-root'));
+
+    existsSpy.mockRestore();
+    statSpy.mockRestore();
+    writeSpy.mockRestore();
+  });
+
+  it('emits file/byte progress events while creating a snapshot', async () => {
+    vi.mocked(listSaveLocations).mockReturnValue([
+      {
+        id: 'loc-1',
+        game_id: 'game-1',
+        path: 'C:\\Saves\\profile.sav',
+        type: 'file',
+        auto_detected: false,
+        enabled: true,
+        exists: true
+      }
+    ]);
+    const existsSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    const statSpy = vi.spyOn(fs.promises, 'stat').mockResolvedValue({ size: 12 } as fs.Stats);
+    const writeSpy = vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined);
+    vi.mocked(hashFile).mockResolvedValue('file-checksum');
+
+    const db = createMemoryDb({
+      games: [
+        {
+          id: 'game-1',
+          name: 'Game One',
+          install_path: 'C:\\Games\\One',
+          exe_path: 'C:\\Games\\One\\one.exe',
+          created_at: new Date().toISOString(),
+          last_seen_at: null,
+          status: 'protected',
+          folder_name: 'game-1'
+        }
+      ]
+    });
+
+    const events: BackupProgressPayload[] = [];
+    const unsubscribe = onBackupProgress((payload) => events.push(payload));
+    const snapshot = await backupGame(db, settings, 'game-1', 'manual');
+    unsubscribe();
+
+    expect(snapshot).not.toBeNull();
+    expect(events.map((event) => event.stage)).toEqual(['started', 'progress', 'completed']);
+    expect(events[0]).toMatchObject({
+      gameId: 'game-1',
+      reason: 'manual',
+      totalFiles: 1,
+      completedFiles: 0,
+      totalBytes: 12,
+      copiedBytes: 0,
+      percent: 0
+    });
+    expect(events[1]).toMatchObject({
+      stage: 'progress',
+      completedFiles: 1,
+      totalBytes: 12,
+      copiedBytes: 12,
+      percent: 100
+    });
+    expect(events[2]).toMatchObject({
+      stage: 'completed',
+      completedFiles: 1,
+      totalBytes: 12,
+      copiedBytes: 12,
+      percent: 100
+    });
+    expect(events[2]?.snapshotId).toBe(snapshot?.id);
 
     existsSpy.mockRestore();
     statSpy.mockRestore();

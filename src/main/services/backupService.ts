@@ -3,9 +3,11 @@ import path from 'path';
 import { v4 as uuid } from 'uuid';
 import {
   BackupScanResult,
+  BackupProgressPayload,
   Game,
   SaveLocation,
   Settings,
+  SnapshotCreatedPayload,
   Snapshot,
   SnapshotFile,
   VerifyResult
@@ -20,6 +22,18 @@ import { ensureDir, getSnapshotRoot, toSafeGameFolderName } from './storage';
 
 const inFlight = new Set<string>();
 const SNAPSHOT_MANIFEST_FILE_NAME = 'snapshot.manifest.json';
+const snapshotCreatedListeners = new Set<(payload: SnapshotCreatedPayload) => void>();
+const backupProgressListeners = new Set<(payload: BackupProgressPayload) => void>();
+
+export function onSnapshotCreated(listener: (payload: SnapshotCreatedPayload) => void): () => void {
+  snapshotCreatedListeners.add(listener);
+  return () => snapshotCreatedListeners.delete(listener);
+}
+
+export function onBackupProgress(listener: (payload: BackupProgressPayload) => void): () => void {
+  backupProgressListeners.add(listener);
+  return () => backupProgressListeners.delete(listener);
+}
 
 interface SnapshotManifestLocation {
   path: string;
@@ -46,6 +60,13 @@ interface ScannedSnapshotPayload {
 interface RecoveredGameMetadata {
   game: StoredGame;
   gameFolder: string;
+}
+
+interface PlannedBackupFile {
+  locationId: string;
+  relativePath: string;
+  sourcePath: string;
+  sourceSize: number;
 }
 
 export async function scanSnapshotsFromDisk(db: AppDb, settings: Settings): Promise<BackupScanResult> {
@@ -207,6 +228,11 @@ export async function backupGame(
   const createdAt = new Date().toISOString();
   const snapshotFolder = resolveUniqueSnapshotFolderName(settings.storageRoot, game.folder_name, createdAt);
   const snapshotRoot = getSnapshotRoot(settings.storageRoot, game.folder_name, snapshotFolder);
+  let progressStarted = false;
+  let totalFilesPlanned = 0;
+  let totalBytesPlanned = 0;
+  let completedFiles = 0;
+  let copiedBytes = 0;
 
   try {
     ensureDir(snapshotRoot);
@@ -220,6 +246,7 @@ export async function backupGame(
     }
 
     const snapshotFiles: SnapshotFile[] = [];
+    const plannedFiles: PlannedBackupFile[] = [];
     let totalSize = 0;
     let warnings = 0;
 
@@ -234,29 +261,67 @@ export async function backupGame(
       for (const filePath of files) {
         const relativePath =
           location.type === 'file' ? path.basename(filePath) : path.relative(location.path, filePath);
-        const locationFolder = locationStorageFolders.get(location.id) ?? location.id;
-        const destPath = path.join(snapshotRoot, locationFolder, relativePath);
-        await copyFileWithRetries(filePath, destPath, 4);
-
-        const stats = await fs.promises.stat(destPath);
-        const checksum = await hashFile(destPath);
-        snapshotFiles.push({
-          id: uuid(),
-          snapshot_id: snapshotId,
-          location_id: location.id,
-          relative_path: relativePath,
-          size_bytes: stats.size,
-          checksum
+        const sourceStats = await fs.promises.stat(filePath);
+        plannedFiles.push({
+          locationId: location.id,
+          relativePath,
+          sourcePath: filePath,
+          sourceSize: sourceStats.size
         });
-        totalSize += stats.size;
       }
     }
 
-    if (snapshotFiles.length === 0) {
+    if (plannedFiles.length === 0) {
       updateGameStatus(db, gameId, 'warning');
       logEvent(db, gameId, 'error', 'Backup skipped: no files found in enabled save locations.');
       await removeDirSafe(snapshotRoot);
       return null;
+    }
+
+    totalFilesPlanned = plannedFiles.length;
+    totalBytesPlanned = plannedFiles.reduce((sum, file) => sum + file.sourceSize, 0);
+    emitBackupProgress(
+      createBackupProgressPayload({
+        gameId,
+        reason,
+        stage: 'started',
+        totalFiles: totalFilesPlanned,
+        completedFiles,
+        totalBytes: totalBytesPlanned,
+        copiedBytes
+      })
+    );
+    progressStarted = true;
+
+    for (const plannedFile of plannedFiles) {
+      const locationFolder = locationStorageFolders.get(plannedFile.locationId) ?? plannedFile.locationId;
+      const destPath = path.join(snapshotRoot, locationFolder, plannedFile.relativePath);
+      await copyFileWithRetries(plannedFile.sourcePath, destPath, 4);
+
+      const stats = await fs.promises.stat(destPath);
+      const checksum = await hashFile(destPath);
+      snapshotFiles.push({
+        id: uuid(),
+        snapshot_id: snapshotId,
+        location_id: plannedFile.locationId,
+        relative_path: plannedFile.relativePath,
+        size_bytes: stats.size,
+        checksum
+      });
+      totalSize += stats.size;
+      completedFiles += 1;
+      copiedBytes += plannedFile.sourceSize;
+      emitBackupProgress(
+        createBackupProgressPayload({
+          gameId,
+          reason,
+          stage: 'progress',
+          totalFiles: totalFilesPlanned,
+          completedFiles,
+          totalBytes: totalBytesPlanned,
+          copiedBytes
+        })
+      );
     }
 
     const snapshot: Snapshot = {
@@ -280,15 +345,110 @@ export async function backupGame(
 
     updateGameStatus(db, gameId, warnings > 0 ? 'warning' : 'protected');
     logEvent(db, gameId, 'backup', `Snapshot created (${reason}).`);
+    emitBackupProgress(
+      createBackupProgressPayload({
+        gameId,
+        reason,
+        stage: 'completed',
+        totalFiles: totalFilesPlanned,
+        completedFiles: totalFilesPlanned,
+        totalBytes: totalBytesPlanned,
+        copiedBytes: totalBytesPlanned,
+        snapshotId: snapshot.id,
+        createdAt: snapshot.created_at
+      })
+    );
+    emitSnapshotCreated({
+      gameId,
+      snapshotId: snapshot.id,
+      reason: snapshot.reason,
+      createdAt: snapshot.created_at
+    });
     return snapshot;
   } catch (error: any) {
     updateGameStatus(db, gameId, 'warning');
-    logEvent(db, gameId, 'error', `Backup failed: ${error.message || error}`);
+    const errorMessage = error instanceof Error && error.message ? error.message : String(error);
+    logEvent(db, gameId, 'error', `Backup failed: ${errorMessage}`);
+    if (progressStarted) {
+      emitBackupProgress(
+        createBackupProgressPayload({
+          gameId,
+          reason,
+          stage: 'failed',
+          totalFiles: totalFilesPlanned,
+          completedFiles,
+          totalBytes: totalBytesPlanned,
+          copiedBytes,
+          message: errorMessage
+        })
+      );
+    }
     await removeDirSafe(snapshotRoot);
     throw error;
   } finally {
     inFlight.delete(gameId);
   }
+}
+
+function emitSnapshotCreated(payload: SnapshotCreatedPayload): void {
+  for (const listener of snapshotCreatedListeners) {
+    try {
+      listener(payload);
+    } catch {
+      // Keep backup flow resilient even if a listener fails.
+    }
+  }
+}
+
+function emitBackupProgress(payload: BackupProgressPayload): void {
+  for (const listener of backupProgressListeners) {
+    try {
+      listener(payload);
+    } catch {
+      // Keep backup flow resilient even if a listener fails.
+    }
+  }
+}
+
+function createBackupProgressPayload(args: {
+  gameId: string;
+  reason: Snapshot['reason'];
+  stage: BackupProgressPayload['stage'];
+  totalFiles: number;
+  completedFiles: number;
+  totalBytes: number;
+  copiedBytes: number;
+  snapshotId?: string;
+  createdAt?: string;
+  message?: string;
+}): BackupProgressPayload {
+  const boundedTotalFiles = Math.max(0, args.totalFiles);
+  const boundedCompletedFiles = Math.max(0, Math.min(args.completedFiles, boundedTotalFiles));
+  const boundedTotalBytes = Math.max(0, args.totalBytes);
+  const boundedCopiedBytes = Math.max(0, Math.min(args.copiedBytes, boundedTotalBytes));
+  let percent = 0;
+
+  if (args.stage === 'completed') {
+    percent = 100;
+  } else if (boundedTotalBytes > 0) {
+    percent = Math.round((boundedCopiedBytes / boundedTotalBytes) * 100);
+  } else if (boundedTotalFiles > 0) {
+    percent = Math.round((boundedCompletedFiles / boundedTotalFiles) * 100);
+  }
+
+  return {
+    gameId: args.gameId,
+    reason: args.reason,
+    stage: args.stage,
+    totalFiles: boundedTotalFiles,
+    completedFiles: boundedCompletedFiles,
+    totalBytes: boundedTotalBytes,
+    copiedBytes: boundedCopiedBytes,
+    percent: Math.max(0, Math.min(percent, 100)),
+    snapshotId: args.snapshotId ?? null,
+    createdAt: args.createdAt ?? null,
+    message: args.message ?? null
+  };
 }
 
 export async function restoreSnapshot(db: AppDb, settings: Settings, snapshotId: string): Promise<void> {

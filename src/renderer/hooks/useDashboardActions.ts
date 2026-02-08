@@ -95,16 +95,15 @@ export function useDashboardActions({
 
   const handleBackupNow = useCallback(
     async (gameId: string) => {
-      const loadingToastId = toast.loading('Backup in progress...');
       try {
         await window.gamesaver.backupNow(gameId);
         await refreshGames();
         if (selectedDetail) {
           await refreshDetail();
         }
-        toast.success('Backup request completed.', { id: loadingToastId });
+        toast.success('Backup request completed.');
       } catch (error) {
-        toast.error(getErrorMessage(error, 'Backup failed.'), { id: loadingToastId, duration: 5000 });
+        toast.error(getErrorMessage(error, 'Backup failed.'), { duration: 5000 });
       }
     },
     [refreshDetail, refreshGames, selectedDetail]
