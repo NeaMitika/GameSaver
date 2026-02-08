@@ -65,8 +65,6 @@ const WIDGET_WINDOW_SIZE = {
 	height: 380,
 };
 
-const TRAY_ICON_FALLBACK_PNG_BASE64 =
-	'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAABVSURBVDhPY/C61/CfEjxqAIkG8ItrYYgRbQBIMwwji5NsALo4VgPQFeLSDMIYBsAUwzSg89ExThegY2zqQBhnGBCjGYTxBiIhzSCM1wBi8EAb0PAfAKENht+Oa+oNAAAAAElFTkSuQmCC';
 const DEV_SERVER_ORIGIN = 'http://localhost:5175';
 
 function buildContentSecurityPolicy(isDev: boolean): string {
@@ -106,16 +104,8 @@ function normalizeTrayIcon(image: NativeImage): NativeImage {
 	return image.resize({ width: 16, height: 16 });
 }
 
-function getFallbackTrayIcon(): NativeImage {
-	const image = nativeImage.createFromDataURL(`data:image/png;base64,${TRAY_ICON_FALLBACK_PNG_BASE64}`);
-	if (image.isEmpty()) {
-		return nativeImage.createEmpty();
-	}
-	return normalizeTrayIcon(image);
-}
-
 function getTrayIconPathCandidates(): string[] {
-	const fileNames = ['icon.ico', 'icon.png', 'tray.ico', 'tray.png'];
+	const fileNames = ['icon.ico', 'icon.png'];
 	const directories = [
 		path.join(process.cwd(), 'build'),
 		path.join(app.getAppPath(), 'build'),
@@ -146,7 +136,7 @@ function resolveWindowIconPath(): string | undefined {
 	return undefined;
 }
 
-async function resolveTrayIcon(): Promise<NativeImage> {
+function resolveTrayIcon(): NativeImage {
 	for (const iconPath of getTrayIconPathCandidates()) {
 		if (!fs.existsSync(iconPath)) {
 			continue;
@@ -157,23 +147,9 @@ async function resolveTrayIcon(): Promise<NativeImage> {
 		}
 	}
 
-	try {
-		const exeIcon = await app.getFileIcon(process.execPath, { size: 'small' });
-		if (!exeIcon.isEmpty()) {
-			return normalizeTrayIcon(exeIcon);
-		}
-	} catch {
-		// Ignore icon extraction errors and use fallback icon.
-	}
-
-	return getFallbackTrayIcon();
-}
-
-async function applyResolvedTrayIcon(): Promise<void> {
-	if (!tray) return;
-	const resolvedIcon = await resolveTrayIcon();
-	if (!tray || resolvedIcon.isEmpty()) return;
-	tray.setImage(resolvedIcon);
+	throw new Error(
+		`Tray icon is required but no valid icon was found. Checked: ${getTrayIconPathCandidates().join(', ')}`,
+	);
 }
 
 function showMainWindow(): void {
@@ -225,7 +201,7 @@ function updateTrayMenu(): void {
 
 function createTray(): void {
 	if (tray) return;
-	tray = new Tray(getFallbackTrayIcon());
+	tray = new Tray(resolveTrayIcon());
 	tray.setToolTip('GameSaver');
 	tray.on('click', () => {
 		if (mainWindow?.isVisible()) {
@@ -238,7 +214,6 @@ function createTray(): void {
 		showMainWindow();
 	});
 	updateTrayMenu();
-	void applyResolvedTrayIcon();
 }
 
 function applyWindowLayout(mode: WindowLayoutMode): WindowLayoutMode {
@@ -506,13 +481,11 @@ function getErrorMessage(error: unknown, fallback: string): string {
 type SaveLocationDialogTarget = 'file' | 'folder';
 
 async function showSaveLocationOpenDialog(target: SaveLocationDialogTarget): Promise<string | null> {
-	const properties: Array<'openFile' | 'openDirectory'> = [
-		target === 'file' ? 'openFile' : 'openDirectory',
-	];
+	const properties: Array<'openFile' | 'openDirectory'> = [target === 'file' ? 'openFile' : 'openDirectory'];
 	const result = await dialog.showOpenDialog({
 		properties,
 	});
-	return result.canceled ? null : result.filePaths[0] ?? null;
+	return result.canceled ? null : (result.filePaths[0] ?? null);
 }
 
 async function pickSaveLocationPath(): Promise<string | null> {
@@ -751,7 +724,7 @@ function registerIpc(): void {
 				activeDb,
 				location.game_id,
 				'error',
-				`Auto backup after save-location add failed: ${getErrorMessage(error, 'Unknown error')}`
+				`Auto backup after save-location add failed: ${getErrorMessage(error, 'Unknown error')}`,
 			);
 		});
 		return location;
@@ -770,7 +743,7 @@ function registerIpc(): void {
 					activeDb,
 					location.game_id,
 					'error',
-					`Auto backup after save-location enable failed: ${getErrorMessage(error, 'Unknown error')}`
+					`Auto backup after save-location enable failed: ${getErrorMessage(error, 'Unknown error')}`,
 				);
 			});
 		}
