@@ -39,7 +39,7 @@ vi.mock('../src/main/services/gameService', () => ({
 
 import { backupGame, deleteSnapshot, onBackupProgress, restoreSnapshot } from '../src/main/services/backupService';
 import { logEvent } from '../src/main/services/eventLogService';
-import { removeDirSafe, walkFiles } from '../src/main/services/fileOps';
+import { copyFileWithRetries, removeDirSafe, walkFiles } from '../src/main/services/fileOps';
 import { updateGameStatus } from '../src/main/services/gameService';
 import { hashFile } from '../src/main/services/hash';
 import { listSaveLocations } from '../src/main/services/saveLocationService';
@@ -59,6 +59,7 @@ describe('backupService', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    vi.mocked(copyFileWithRetries).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -249,6 +250,110 @@ describe('backupService', () => {
     writeSpy.mockRestore();
   });
 
+  it('continues backup when one file copy fails with EINVAL', async () => {
+    vi.mocked(listSaveLocations).mockReturnValue([
+      {
+        id: 'loc-1',
+        game_id: 'game-1',
+        path: 'C:\\Users\\Luciano\\Desktop',
+        type: 'folder',
+        auto_detected: false,
+        enabled: true,
+        exists: true
+      }
+    ]);
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    vi.mocked(walkFiles).mockResolvedValue([
+      'C:\\Users\\Luciano\\Desktop\\ok.sav',
+      'C:\\Users\\Luciano\\Desktop\\Windows.iso'
+    ]);
+    vi.spyOn(fs.promises, 'stat').mockImplementation(async (target: fs.PathLike) => {
+      const value = String(target);
+      if (value.toLowerCase().includes('windows.iso')) {
+        return { size: 700 } as fs.Stats;
+      }
+      return { size: 120 } as fs.Stats;
+    });
+    vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined);
+    vi.mocked(hashFile).mockResolvedValue('file-checksum');
+    vi.mocked(copyFileWithRetries).mockImplementation(async (src: string) => {
+      if (src.toLowerCase().includes('windows.iso')) {
+        throw new Error('EINVAL: invalid argument, copyfile');
+      }
+    });
+
+    const db = createMemoryDb({
+      games: [
+        {
+          id: 'game-1',
+          name: 'Game One',
+          install_path: 'C:\\Games\\One',
+          exe_path: 'C:\\Games\\One\\one.exe',
+          created_at: new Date().toISOString(),
+          last_seen_at: null,
+          status: 'protected',
+          folder_name: 'game-1'
+        }
+      ]
+    });
+
+    const snapshot = await backupGame(db, settings, 'game-1', 'manual');
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.size_bytes).toBe(120);
+    expect(db.state.snapshotFiles.filter((file) => file.snapshot_id === snapshot?.id)).toHaveLength(1);
+    expect(updateGameStatus).toHaveBeenCalledWith(db, 'game-1', 'warning');
+    expect(logEvent).toHaveBeenCalledWith(
+      db,
+      'game-1',
+      'error',
+      expect.stringContaining('Backup skipped file "Windows.iso"')
+    );
+  });
+
+  it('returns null when all planned file copies fail', async () => {
+    vi.mocked(listSaveLocations).mockReturnValue([
+      {
+        id: 'loc-1',
+        game_id: 'game-1',
+        path: 'C:\\Users\\Luciano\\Desktop',
+        type: 'folder',
+        auto_detected: false,
+        enabled: true,
+        exists: true
+      }
+    ]);
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    vi.mocked(walkFiles).mockResolvedValue(['C:\\Users\\Luciano\\Desktop\\Windows.iso']);
+    vi.spyOn(fs.promises, 'stat').mockResolvedValue({ size: 700 } as fs.Stats);
+    vi.mocked(copyFileWithRetries).mockRejectedValue(new Error('EINVAL: invalid argument, copyfile'));
+
+    const db = createMemoryDb({
+      games: [
+        {
+          id: 'game-1',
+          name: 'Game One',
+          install_path: 'C:\\Games\\One',
+          exe_path: 'C:\\Games\\One\\one.exe',
+          created_at: new Date().toISOString(),
+          last_seen_at: null,
+          status: 'protected',
+          folder_name: 'game-1'
+        }
+      ]
+    });
+
+    const snapshot = await backupGame(db, settings, 'game-1', 'manual');
+    expect(snapshot).toBeNull();
+    expect(updateGameStatus).toHaveBeenCalledWith(db, 'game-1', 'warning');
+    expect(logEvent).toHaveBeenCalledWith(
+      db,
+      'game-1',
+      'error',
+      'Backup skipped: failed to copy files from enabled save locations.'
+    );
+    expect(removeDirSafe).toHaveBeenCalledWith(path.join('tmp', 'snapshot-root'));
+  });
+
   it('rejects verification when snapshot manifest is missing', async () => {
     const snapshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-snapshot-missing-manifest-'));
     tempRoots.push(snapshotRoot);
@@ -337,9 +442,14 @@ describe('backupService', () => {
     );
   });
 
-  it('blocks restore when pre-restore safety snapshot cannot be created', async () => {
+  it('continues restore when pre-restore safety snapshot cannot be created', async () => {
     const snapshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-restore-safety-block-'));
     tempRoots.push(snapshotRoot);
+    const restoreTargetRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-restore-target-'));
+    tempRoots.push(restoreTargetRoot);
+    const sourceBackupFile = path.join(snapshotRoot, 'loc-1', 'save.sav');
+    fs.mkdirSync(path.dirname(sourceBackupFile), { recursive: true });
+    fs.writeFileSync(sourceBackupFile, 'backup-data', 'utf-8');
     fs.writeFileSync(
       path.join(snapshotRoot, 'snapshot.manifest.json'),
       JSON.stringify(
@@ -348,14 +458,33 @@ describe('backupService', () => {
           snapshot_id: 'snap-1',
           created_at: new Date().toISOString(),
           reason: 'manual',
-          locations: {}
+          locations: {
+            'loc-1': {
+              path: restoreTargetRoot,
+              type: 'folder',
+              auto_detected: false,
+              enabled: true,
+              storage_folder: 'loc-1'
+            }
+          }
         },
         null,
         2
       ),
       'utf-8'
     );
-    vi.mocked(listSaveLocations).mockReturnValue([]);
+    vi.mocked(listSaveLocations).mockReturnValue([
+      {
+        id: 'loc-1',
+        game_id: 'game-1',
+        path: restoreTargetRoot,
+        type: 'folder',
+        auto_detected: false,
+        enabled: true,
+        exists: true
+      }
+    ]);
+    vi.mocked(walkFiles).mockResolvedValue([]);
 
     const db = createMemoryDb({
       games: [
@@ -380,11 +509,369 @@ describe('backupService', () => {
           storage_path: snapshotRoot,
           reason: 'manual'
         }
+      ],
+      snapshotFiles: [
+        {
+          id: 'file-1',
+          snapshot_id: 'snap-1',
+          location_id: 'loc-1',
+          relative_path: 'save.sav',
+          size_bytes: Buffer.byteLength('backup-data'),
+          checksum: 'file-checksum'
+        }
       ]
     });
 
-    await expect(restoreSnapshot(db, settings, 'snap-1')).rejects.toThrow(
-      'Restore blocked: failed to create safety backup before restore.'
+    await expect(restoreSnapshot(db, settings, 'snap-1')).resolves.toBeUndefined();
+    expect(copyFileWithRetries).toHaveBeenCalledWith(
+      sourceBackupFile,
+      path.join(restoreTargetRoot, 'save.sav'),
+      3
+    );
+    expect(logEvent).toHaveBeenCalledWith(
+      db,
+      'game-1',
+      'error',
+      expect.stringContaining('Proceeding with restore without safety backup')
+    );
+    expect(logEvent).toHaveBeenCalledWith(
+      db,
+      'game-1',
+      'restore',
+      expect.stringContaining('Snapshot restored (')
+    );
+  });
+
+  it('restores using manifest destination when snapshot location id no longer exists', async () => {
+    const snapshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-restore-manifest-fallback-'));
+    tempRoots.push(snapshotRoot);
+    const restoreTargetRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-restore-manifest-target-'));
+    tempRoots.push(restoreTargetRoot);
+
+    const sourceBackupFile = path.join(snapshotRoot, 'legacy-storage', 'save.sav');
+    fs.mkdirSync(path.dirname(sourceBackupFile), { recursive: true });
+    fs.writeFileSync(sourceBackupFile, 'backup-data', 'utf-8');
+    fs.writeFileSync(
+      path.join(snapshotRoot, 'snapshot.manifest.json'),
+      JSON.stringify(
+        {
+          version: 2,
+          snapshot_id: 'snap-legacy',
+          created_at: new Date().toISOString(),
+          reason: 'manual',
+          locations: {
+            'legacy-loc-id': {
+              path: restoreTargetRoot,
+              type: 'folder',
+              auto_detected: false,
+              enabled: true,
+              storage_folder: 'legacy-storage'
+            }
+          }
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    vi.mocked(listSaveLocations).mockReturnValue([]);
+    vi.mocked(walkFiles).mockResolvedValue([]);
+
+    const db = createMemoryDb({
+      games: [
+        {
+          id: 'game-1',
+          name: 'Game One',
+          install_path: 'C:\\Games\\One',
+          exe_path: 'C:\\Games\\One\\one.exe',
+          created_at: new Date().toISOString(),
+          last_seen_at: null,
+          status: 'protected',
+          folder_name: 'game-1'
+        }
+      ],
+      snapshots: [
+        {
+          id: 'snap-legacy',
+          game_id: 'game-1',
+          created_at: new Date().toISOString(),
+          size_bytes: Buffer.byteLength('backup-data'),
+          checksum: 'snapshot-checksum',
+          storage_path: snapshotRoot,
+          reason: 'manual'
+        }
+      ],
+      snapshotFiles: [
+        {
+          id: 'file-legacy',
+          snapshot_id: 'snap-legacy',
+          location_id: 'legacy-loc-id',
+          relative_path: 'save.sav',
+          size_bytes: Buffer.byteLength('backup-data'),
+          checksum: 'file-checksum'
+        }
+      ]
+    });
+
+    await expect(restoreSnapshot(db, settings, 'snap-legacy')).resolves.toBeUndefined();
+    expect(copyFileWithRetries).toHaveBeenCalledWith(
+      sourceBackupFile,
+      path.join(restoreTargetRoot, 'save.sav'),
+      3
+    );
+    expect(logEvent).toHaveBeenCalledWith(
+      db,
+      'game-1',
+      'restore',
+      expect.stringContaining('Snapshot restored (')
+    );
+  });
+
+  it('prefers current save location when snapshot location id is stale and path changed', async () => {
+    const snapshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-restore-current-location-'));
+    tempRoots.push(snapshotRoot);
+    const oldPathFromManifest = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-restore-old-manifest-'));
+    tempRoots.push(oldPathFromManifest);
+    const currentSavePath = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-restore-current-target-'));
+    tempRoots.push(currentSavePath);
+
+    const sourceBackupFile = path.join(snapshotRoot, 'backup', 'save.sav');
+    fs.mkdirSync(path.dirname(sourceBackupFile), { recursive: true });
+    fs.writeFileSync(sourceBackupFile, 'backup-data', 'utf-8');
+    fs.writeFileSync(
+      path.join(snapshotRoot, 'snapshot.manifest.json'),
+      JSON.stringify(
+        {
+          version: 2,
+          snapshot_id: 'snap-stale-id',
+          created_at: new Date().toISOString(),
+          reason: 'manual',
+          locations: {
+            'legacy-loc-id': {
+              path: oldPathFromManifest,
+              type: 'folder',
+              auto_detected: false,
+              enabled: true,
+              storage_folder: 'backup'
+            }
+          }
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    vi.mocked(listSaveLocations).mockReturnValue([
+      {
+        id: 'new-loc-id',
+        game_id: 'game-1',
+        path: currentSavePath,
+        type: 'folder',
+        auto_detected: false,
+        enabled: true,
+        exists: true
+      }
+    ]);
+    vi.mocked(walkFiles).mockResolvedValue([]);
+
+    const db = createMemoryDb({
+      games: [
+        {
+          id: 'game-1',
+          name: 'Game One',
+          install_path: 'C:\\Games\\One',
+          exe_path: 'C:\\Games\\One\\one.exe',
+          created_at: new Date().toISOString(),
+          last_seen_at: null,
+          status: 'protected',
+          folder_name: 'game-1'
+        }
+      ],
+      snapshots: [
+        {
+          id: 'snap-stale-id',
+          game_id: 'game-1',
+          created_at: new Date().toISOString(),
+          size_bytes: Buffer.byteLength('backup-data'),
+          checksum: 'snapshot-checksum',
+          storage_path: snapshotRoot,
+          reason: 'manual'
+        }
+      ],
+      snapshotFiles: [
+        {
+          id: 'file-stale-id',
+          snapshot_id: 'snap-stale-id',
+          location_id: 'legacy-loc-id',
+          relative_path: 'save.sav',
+          size_bytes: Buffer.byteLength('backup-data'),
+          checksum: 'file-checksum'
+        }
+      ]
+    });
+
+    await expect(restoreSnapshot(db, settings, 'snap-stale-id')).resolves.toBeUndefined();
+    expect(copyFileWithRetries).toHaveBeenCalledWith(
+      sourceBackupFile,
+      path.join(currentSavePath, 'save.sav'),
+      3
+    );
+  });
+
+  it('restores to single current location when stale manifest location type differs', async () => {
+    const snapshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-restore-type-mismatch-'));
+    tempRoots.push(snapshotRoot);
+    const oldFileParent = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-restore-old-file-parent-'));
+    tempRoots.push(oldFileParent);
+    const currentFolderPath = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-restore-current-folder-'));
+    tempRoots.push(currentFolderPath);
+
+    const sourceBackupFile = path.join(snapshotRoot, 'legacy-file', 'FishSaveGame1.pts');
+    fs.mkdirSync(path.dirname(sourceBackupFile), { recursive: true });
+    fs.writeFileSync(sourceBackupFile, 'backup-data', 'utf-8');
+    fs.writeFileSync(
+      path.join(snapshotRoot, 'snapshot.manifest.json'),
+      JSON.stringify(
+        {
+          version: 2,
+          snapshot_id: 'snap-type-mismatch',
+          created_at: new Date().toISOString(),
+          reason: 'manual',
+          locations: {
+            'legacy-loc-id': {
+              path: path.join(oldFileParent, 'FishSaveGame1.pts'),
+              type: 'file',
+              auto_detected: false,
+              enabled: true,
+              storage_folder: 'legacy-file'
+            }
+          }
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    vi.mocked(listSaveLocations).mockReturnValue([
+      {
+        id: 'new-loc-id',
+        game_id: 'game-1',
+        path: currentFolderPath,
+        type: 'folder',
+        auto_detected: false,
+        enabled: true,
+        exists: true
+      }
+    ]);
+    vi.mocked(walkFiles).mockResolvedValue([]);
+
+    const db = createMemoryDb({
+      games: [
+        {
+          id: 'game-1',
+          name: 'FishTycoon',
+          install_path: 'C:\\Program Files (x86)\\Fish Tycoon',
+          exe_path: 'C:\\Program Files (x86)\\Fish Tycoon\\FishTycoon.exe',
+          created_at: new Date().toISOString(),
+          last_seen_at: null,
+          status: 'protected',
+          folder_name: 'FishTycoon'
+        }
+      ],
+      snapshots: [
+        {
+          id: 'snap-type-mismatch',
+          game_id: 'game-1',
+          created_at: new Date().toISOString(),
+          size_bytes: Buffer.byteLength('backup-data'),
+          checksum: 'snapshot-checksum',
+          storage_path: snapshotRoot,
+          reason: 'manual'
+        }
+      ],
+      snapshotFiles: [
+        {
+          id: 'file-type-mismatch',
+          snapshot_id: 'snap-type-mismatch',
+          location_id: 'legacy-loc-id',
+          relative_path: 'FishSaveGame1.pts',
+          size_bytes: Buffer.byteLength('backup-data'),
+          checksum: 'file-checksum'
+        }
+      ]
+    });
+
+    await expect(restoreSnapshot(db, settings, 'snap-type-mismatch')).resolves.toBeUndefined();
+    expect(copyFileWithRetries).toHaveBeenCalledWith(
+      sourceBackupFile,
+      path.join(currentFolderPath, 'FishSaveGame1.pts'),
+      3
+    );
+  });
+
+  it('throws when no files can be restored to any destination', async () => {
+    const snapshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-restore-empty-result-'));
+    tempRoots.push(snapshotRoot);
+    fs.writeFileSync(
+      path.join(snapshotRoot, 'snapshot.manifest.json'),
+      JSON.stringify(
+        {
+          version: 2,
+          snapshot_id: 'snap-empty-result',
+          created_at: new Date().toISOString(),
+          reason: 'manual',
+          locations: {}
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    vi.mocked(listSaveLocations).mockReturnValue([]);
+    vi.mocked(walkFiles).mockResolvedValue([]);
+
+    const db = createMemoryDb({
+      games: [
+        {
+          id: 'game-1',
+          name: 'Game One',
+          install_path: 'C:\\Games\\One',
+          exe_path: 'C:\\Games\\One\\one.exe',
+          created_at: new Date().toISOString(),
+          last_seen_at: null,
+          status: 'protected',
+          folder_name: 'game-1'
+        }
+      ],
+      snapshots: [
+        {
+          id: 'snap-empty-result',
+          game_id: 'game-1',
+          created_at: new Date().toISOString(),
+          size_bytes: 1,
+          checksum: 'snapshot-checksum',
+          storage_path: snapshotRoot,
+          reason: 'manual'
+        }
+      ],
+      snapshotFiles: [
+        {
+          id: 'file-1',
+          snapshot_id: 'snap-empty-result',
+          location_id: 'unknown-loc',
+          relative_path: 'save.sav',
+          size_bytes: 1,
+          checksum: 'file-checksum'
+        }
+      ]
+    });
+
+    await expect(restoreSnapshot(db, settings, 'snap-empty-result')).rejects.toThrow(
+      'Restore failed: no files could be restored to destination paths.'
     );
   });
 

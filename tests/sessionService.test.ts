@@ -18,7 +18,7 @@ vi.mock('child_process', () => ({
 	execFile: vi.fn(),
 }));
 
-import psList from 'ps-list';
+import psList, { type ProcessDescriptor } from 'ps-list';
 import { execFile } from 'child_process';
 import { backupGame } from '../src/main/services/backupService';
 import {
@@ -51,7 +51,7 @@ describe('sessionService', () => {
 	});
 
 	it('does not overlap poll cycles while a previous cycle is pending', async () => {
-		const deferred = createDeferred<Array<{ name?: string; cmd?: string }>>();
+		const deferred = createDeferred<ProcessDescriptor[]>();
 		vi.mocked(psList).mockImplementation(() => deferred.promise);
 		const db = createMockSessionDb();
 
@@ -87,6 +87,29 @@ describe('sessionService', () => {
 		expect(statuses).toContainEqual({ gameId: 'game-1', isRunning: false });
 
 		unsubscribe();
+	});
+
+	it('handles games with no executable or install path', async () => {
+		const db = createMemoryDb({
+			games: [
+				{
+					id: 'game-1',
+					name: 'Name Only Game',
+					exe_path: '',
+					install_path: '',
+					created_at: new Date().toISOString(),
+					last_seen_at: null,
+					status: 'protected',
+					folder_name: 'Name Only Game',
+				},
+			],
+		});
+
+		startSessionMonitor(db, settings);
+		await vi.advanceTimersByTimeAsync(6000);
+
+		expect(getRunningMap().get('game-1')).toBeUndefined();
+		expect(vi.mocked(backupGame)).not.toHaveBeenCalled();
 	});
 });
 

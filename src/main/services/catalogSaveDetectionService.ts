@@ -167,11 +167,13 @@ export async function detectCatalogSavePaths(
   });
 
   const readExeMetadata = adapters.readExeMetadata ?? readExeMetadataFromFile;
-  const metadata = await readExeMetadata(input.exePath).catch(() => null);
+  const exePath = input.exePath.trim();
+  const installPath = input.installPath.trim();
+  const metadata = exePath ? await readExeMetadata(exePath).catch(() => null) : null;
   debug.exeProductName = metadata?.productName ?? null;
   debug.exeFileDescription = metadata?.fileDescription ?? null;
-  const installFolderName = path.basename(path.normalize(input.installPath));
-  const exeFileName = path.parse(path.basename(input.exePath)).name;
+  const installFolderName = installPath ? path.basename(path.normalize(installPath)) : '';
+  const exeFileName = exePath ? path.parse(path.basename(exePath)).name : '';
   const queryNames = dedupeStrings([
     metadata?.productName ?? '',
     metadata?.fileDescription ?? '',
@@ -237,7 +239,7 @@ export async function detectCatalogSavePaths(
   const readRegistryValues = adapters.readRegistryValues ?? readRegistryValuesFromKey;
   const steamLibraries = await listSteamLibraries().catch(() => []);
   const resolutionContext: ResolveContext = {
-    installPath: input.installPath,
+    installPath,
     gameName: input.gameName,
     steamLibraries
   };

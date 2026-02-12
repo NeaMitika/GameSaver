@@ -20,7 +20,7 @@ export default function AddGamePanel({ onCancel, onCreated, onError }: AddGamePa
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div>
           <CardTitle>Add Game</CardTitle>
-          <CardDescription>Point GameSaver to a game executable and installation folder.</CardDescription>
+          <CardDescription>Add by name, then optionally link the executable and install folder.</CardDescription>
         </div>
         <Button variant="ghost" size="sm" onClick={onCancel}>
           Close
@@ -41,7 +41,7 @@ export default function AddGamePanel({ onCancel, onCreated, onError }: AddGamePa
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="exe-path">Executable Path</Label>
+            <Label htmlFor="exe-path">Executable Path (Optional)</Label>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Input
                 id="exe-path"
@@ -58,7 +58,7 @@ export default function AddGamePanel({ onCancel, onCreated, onError }: AddGamePa
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="install-path">Install Folder</Label>
+            <Label htmlFor="install-path">Install Folder (Optional)</Label>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Input
                 id="install-path"

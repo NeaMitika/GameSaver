@@ -12,6 +12,8 @@ type GameRowProps = {
 };
 
 export default function GameRow({ game, onOpenDetail, onBackupNow }: GameRowProps) {
+	const installPathLabel = game.install_path.trim().length > 0 ? middleEllipsis(game.install_path, 20, 20) : 'No install folder linked';
+
 	return (
 		<div
 			role='button'
@@ -37,7 +39,7 @@ export default function GameRow({ game, onOpenDetail, onBackupNow }: GameRowProp
 							</div>
 						</div>
 						<p className='min-w-0 flex-1 truncate text-xs text-muted-foreground'>
-							{middleEllipsis(game.install_path, 20, 20)}
+							{installPathLabel}
 						</p>
 					</div>
 				</div>

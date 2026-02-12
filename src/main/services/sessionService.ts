@@ -138,10 +138,12 @@ async function detectStableRunning(
   processes: Array<{ name: string; cmd: string }>
 ): Promise<boolean> {
   const now = Date.now();
-  const exePath = path.normalize(exePathValue).toLowerCase();
-  const exeName = path.basename(exePath);
-  const exeStem = path.parse(exeName).name;
-  const installPath = path.normalize(installPathValue);
+  const exePathRaw = exePathValue.trim();
+  const installPathRaw = installPathValue.trim();
+  const exePath = exePathRaw ? path.normalize(exePathRaw).toLowerCase() : '';
+  const exeName = exePath ? path.basename(exePath) : '';
+  const exeStem = exeName ? path.parse(exeName).name : '';
+  const installPath = installPathRaw ? path.normalize(installPathRaw) : '';
 
   let isRunning = false;
   const trackedPid = launchedPidMap.get(gameId);
@@ -154,13 +156,13 @@ async function detectStableRunning(
     }
   }
 
-  if (!isRunning) {
+  if (!isRunning && exePath && exeName) {
     isRunning = processes.some(
       (proc) => proc.name === exeName || proc.name === exeStem || proc.cmd.includes(exePath)
     );
   }
 
-  if (!isRunning && process.platform === 'win32') {
+  if (!isRunning && process.platform === 'win32' && exePath && exeName) {
     isRunning = await isProcessRunningByPath(exeName, exePath);
   }
 
@@ -304,4 +306,3 @@ export function resetSessionServiceForTests(): void {
   pollInFlight = false;
   monitorRunId = 0;
 }
-

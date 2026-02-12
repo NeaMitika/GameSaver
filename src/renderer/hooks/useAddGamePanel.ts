@@ -28,10 +28,7 @@ export function useAddGamePanel({ onCreated, onError }: UseAddGamePanelParams): 
   const [installPath, setInstallPath] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const canSubmit = useMemo(
-    () => name.trim().length > 1 && exePath.trim().length > 0 && installPath.trim().length > 0,
-    [exePath, installPath, name]
-  );
+  const canSubmit = useMemo(() => name.trim().length > 0, [name]);
 
   const pickExe = useCallback(async () => {
     const result = await window.gamesaver.pickExe();
@@ -63,8 +60,8 @@ export function useAddGamePanel({ onCreated, onError }: UseAddGamePanelParams): 
       try {
         const payload: AddGamePayload = {
           name: name.trim(),
-          exePath,
-          installPath
+          exePath: exePath.trim(),
+          installPath: installPath.trim()
         };
         const game = await window.gamesaver.addGame(payload);
         onCreated(game);

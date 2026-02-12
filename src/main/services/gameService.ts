@@ -50,6 +50,8 @@ export function getGameDetail(db: AppDb, gameId: string): GameDetail {
 
 export function addGame(db: AppDb, payload: AddGamePayload, storageRoot: string): Game {
   const name = payload.name.trim();
+  const installPath = payload.installPath.trim();
+  const exePath = payload.exePath.trim();
   if (!name) {
     throw new Error('Game name is required');
   }
@@ -76,8 +78,8 @@ export function addGame(db: AppDb, payload: AddGamePayload, storageRoot: string)
   const game: StoredGame = {
     id: uuid(),
     name,
-    install_path: payload.installPath,
-    exe_path: payload.exePath,
+    install_path: installPath,
+    exe_path: exePath,
     created_at: now,
     last_seen_at: null,
     status: 'protected',
@@ -125,6 +127,33 @@ export function removeGame(db: AppDb, gameId: string, storageRoot: string): void
   }
 }
 
+export function renameGame(db: AppDb, gameId: string, nextName: string, storageRoot: string): Game {
+  const game = getStoredGameById(db, gameId);
+  if (!game) {
+    throw new Error('Game not found');
+  }
+
+  const name = nextName.trim();
+  if (!name) {
+    throw new Error('Game name is required');
+  }
+
+  const duplicate = db.state.games.find((item) => item.id !== gameId && item.name.toLowerCase() === name.toLowerCase());
+  if (duplicate) {
+    throw new Error('A game with this name already exists.');
+  }
+
+  if (game.name === name) {
+    return toPublicGame(game);
+  }
+
+  game.name = name;
+  persistDb(db);
+  writeGameMetadata(storageRoot, game.folder_name, game);
+  logEvent(db, game.id, 'backup', `Game renamed to "${name}".`);
+  return toPublicGame(game);
+}
+
 export function updateGameStatus(db: AppDb, gameId: string, status: Game['status']): void {
   const game = getStoredGameById(db, gameId);
   if (!game) {
@@ -160,6 +189,10 @@ export function toPublicGame(stored: StoredGame): Game {
 }
 
 function ensureGameFolder(storageRoot: string, gameFolder: string, game: StoredGame): void {
+  writeGameMetadata(storageRoot, gameFolder, game);
+}
+
+function writeGameMetadata(storageRoot: string, gameFolder: string, game: StoredGame): void {
   const gameRoot = getGameRoot(storageRoot, gameFolder);
   ensureDir(gameRoot);
   const metadataPath = getMetadataPath(storageRoot, gameFolder);

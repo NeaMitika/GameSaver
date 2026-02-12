@@ -18,6 +18,7 @@ const api = {
   listGames: (): Promise<GameSummary[]> => ipcRenderer.invoke('games:list'),
   getGame: (gameId: string): Promise<GameDetail> => ipcRenderer.invoke('games:get', gameId),
   addGame: (payload: AddGamePayload): Promise<Game> => ipcRenderer.invoke('games:add', payload),
+  renameGame: (gameId: string, name: string): Promise<Game> => ipcRenderer.invoke('games:rename', { gameId, name }),
   removeGame: (gameId: string): Promise<void> => ipcRenderer.invoke('games:remove', gameId),
   launchGame: (gameId: string): Promise<void> => ipcRenderer.invoke('games:launch', gameId),
   addSaveLocation: (gameId: string, locationPath: string): Promise<SaveLocation> =>

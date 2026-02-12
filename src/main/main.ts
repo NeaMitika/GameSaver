@@ -13,7 +13,7 @@ import {
 } from '../shared/types';
 import { loadSettings, saveSettings, updateSettings } from './services/settingsService';
 import { getDb, closeDb } from './services/db';
-import { listGames, addGame, getGameDetail, removeGame, getStoredGameById } from './services/gameService';
+import { listGames, addGame, getGameDetail, removeGame, getStoredGameById, renameGame } from './services/gameService';
 import { addSaveLocation, toggleSaveLocation, removeSaveLocation } from './services/saveLocationService';
 import {
 	backupGame,
@@ -283,27 +283,40 @@ applyBootstrapUserDataPath();
 const gameIconCache = new Map<string, string>();
 
 function getIconCacheKey(exePath: string): string {
-	return path.normalize(exePath).toLowerCase();
+	const trimmed = exePath.trim();
+	if (!trimmed) {
+		return '';
+	}
+	return path.normalize(trimmed).toLowerCase();
 }
 
 async function getGameExeIcon(exePath: string): Promise<string | null> {
-	const cacheKey = getIconCacheKey(exePath);
-	const cached = gameIconCache.get(cacheKey);
-	if (cached) {
-		return cached;
+	const trimmedPath = exePath.trim();
+	if (!trimmedPath) {
+		return null;
 	}
 
-	if (!fs.existsSync(exePath)) {
+	const cacheKey = getIconCacheKey(exePath);
+	if (cacheKey) {
+		const cached = gameIconCache.get(cacheKey);
+		if (cached) {
+			return cached;
+		}
+	}
+
+	if (!fs.existsSync(trimmedPath)) {
 		return null;
 	}
 
 	try {
-		const icon = await app.getFileIcon(exePath, { size: 'normal' });
+		const icon = await app.getFileIcon(trimmedPath, { size: 'normal' });
 		if (icon.isEmpty()) {
 			return null;
 		}
 		const dataUrl = icon.toDataURL();
-		gameIconCache.set(cacheKey, dataUrl);
+		if (cacheKey) {
+			gameIconCache.set(cacheKey, dataUrl);
+		}
 		return dataUrl;
 	} catch {
 		return null;
@@ -430,6 +443,16 @@ function toNonEmptyString(value: unknown, field: string): string {
 	return trimmed;
 }
 
+function toOptionalString(value: unknown, field: string): string {
+	if (value === undefined || value === null) {
+		return '';
+	}
+	if (typeof value !== 'string') {
+		throw new Error(`Invalid ${field}`);
+	}
+	return value.trim();
+}
+
 function toBoolean(value: unknown, field: string): boolean {
 	if (typeof value !== 'boolean') {
 		throw new Error(`Invalid ${field}`);
@@ -448,8 +471,16 @@ function parseAddGamePayload(input: unknown): AddGamePayload {
 	const payload = toRecord(input, 'games:add');
 	return {
 		name: toNonEmptyString(payload.name, 'name'),
-		exePath: toNonEmptyString(payload.exePath, 'exePath'),
-		installPath: toNonEmptyString(payload.installPath, 'installPath'),
+		exePath: toOptionalString(payload.exePath, 'exePath'),
+		installPath: toOptionalString(payload.installPath, 'installPath'),
+	};
+}
+
+function parseRenameGamePayload(input: unknown): { gameId: string; name: string } {
+	const payload = toRecord(input, 'games:rename');
+	return {
+		gameId: toNonEmptyString(payload.gameId, 'gameId'),
+		name: toNonEmptyString(payload.name, 'name'),
 	};
 }
 
@@ -1091,6 +1122,12 @@ function registerIpc(): void {
 			});
 		return game;
 	});
+	ipcMain.handle('games:rename', (_event, payloadValue: unknown) => {
+		const activeDb = getRequiredDb();
+		const payload = parseRenameGamePayload(payloadValue);
+		const game = renameGame(activeDb, payload.gameId, payload.name, settings.storageRoot);
+		return game;
+	});
 	ipcMain.handle('games:remove', (_event, gameIdValue: unknown) => {
 		const activeDb = getRequiredDb();
 		const gameId = toNonEmptyString(gameIdValue, 'gameId');
@@ -1105,15 +1142,20 @@ function registerIpc(): void {
 		if (!game) {
 			throw new Error('Game not found');
 		}
-		if (!fs.existsSync(game.exe_path)) {
-			logEvent(activeDb, game.id, 'error', `Executable not found: ${game.exe_path}`);
+		const executablePath = game.exe_path.trim();
+		if (!executablePath) {
+			logEvent(activeDb, game.id, 'error', 'Launch blocked: executable path is not configured.');
+			throw new Error('Executable path is not configured for this game.');
+		}
+		if (!fs.existsSync(executablePath)) {
+			logEvent(activeDb, game.id, 'error', `Executable not found: ${executablePath}`);
 			throw new Error('Executable not found');
 		}
 
-		const child = spawn(game.exe_path, [], {
+		const child = spawn(executablePath, [], {
 			detached: true,
 			stdio: 'ignore',
-			cwd: path.dirname(game.exe_path),
+			cwd: path.dirname(executablePath),
 		});
 		if (child.pid) {
 			registerLaunchedProcess(game.id, child.pid);

@@ -294,34 +294,64 @@ export async function backupGame(
     progressStarted = true;
 
     for (const plannedFile of plannedFiles) {
-      const locationFolder = locationStorageFolders.get(plannedFile.locationId) ?? plannedFile.locationId;
-      const destPath = path.join(snapshotRoot, locationFolder, plannedFile.relativePath);
-      await copyFileWithRetries(plannedFile.sourcePath, destPath, 4);
+      try {
+        const locationFolder = locationStorageFolders.get(plannedFile.locationId) ?? plannedFile.locationId;
+        const destPath = path.join(snapshotRoot, locationFolder, plannedFile.relativePath);
+        await copyFileWithRetries(plannedFile.sourcePath, destPath, 4);
 
-      const stats = await fs.promises.stat(destPath);
-      const checksum = await hashFile(destPath);
-      snapshotFiles.push({
-        id: uuid(),
-        snapshot_id: snapshotId,
-        location_id: plannedFile.locationId,
-        relative_path: plannedFile.relativePath,
-        size_bytes: stats.size,
-        checksum
-      });
-      totalSize += stats.size;
-      completedFiles += 1;
-      copiedBytes += plannedFile.sourceSize;
+        const stats = await fs.promises.stat(destPath);
+        const checksum = await hashFile(destPath);
+        snapshotFiles.push({
+          id: uuid(),
+          snapshot_id: snapshotId,
+          location_id: plannedFile.locationId,
+          relative_path: plannedFile.relativePath,
+          size_bytes: stats.size,
+          checksum
+        });
+        totalSize += stats.size;
+        completedFiles += 1;
+        copiedBytes += plannedFile.sourceSize;
+        emitBackupProgress(
+          createBackupProgressPayload({
+            gameId,
+            reason,
+            stage: 'progress',
+            totalFiles: totalFilesPlanned,
+            completedFiles,
+            totalBytes: totalBytesPlanned,
+            copiedBytes
+          })
+        );
+      } catch (error) {
+        warnings += 1;
+        const errorMessage = error instanceof Error && error.message ? error.message : String(error);
+        logEvent(
+          db,
+          gameId,
+          'error',
+          `Backup skipped file "${plannedFile.relativePath}": ${errorMessage}`
+        );
+      }
+    }
+
+    if (snapshotFiles.length === 0) {
+      updateGameStatus(db, gameId, 'warning');
+      logEvent(db, gameId, 'error', 'Backup skipped: failed to copy files from enabled save locations.');
       emitBackupProgress(
         createBackupProgressPayload({
           gameId,
           reason,
-          stage: 'progress',
+          stage: 'failed',
           totalFiles: totalFilesPlanned,
           completedFiles,
           totalBytes: totalBytesPlanned,
-          copiedBytes
+          copiedBytes,
+          message: 'All file copy operations failed.'
         })
       );
+      await removeDirSafe(snapshotRoot);
+      return null;
     }
 
     const snapshot: Snapshot = {
@@ -344,6 +374,14 @@ export async function backupGame(
     }
 
     updateGameStatus(db, gameId, warnings > 0 ? 'warning' : 'protected');
+    if (warnings > 0) {
+      logEvent(
+        db,
+        gameId,
+        'error',
+        `Snapshot completed with skipped files: copied ${snapshotFiles.length}/${plannedFiles.length}.`
+      );
+    }
     logEvent(db, gameId, 'backup', `Snapshot created (${reason}).`);
     emitBackupProgress(
       createBackupProgressPayload({
@@ -351,9 +389,9 @@ export async function backupGame(
         reason,
         stage: 'completed',
         totalFiles: totalFilesPlanned,
-        completedFiles: totalFilesPlanned,
+        completedFiles,
         totalBytes: totalBytesPlanned,
-        copiedBytes: totalBytesPlanned,
+        copiedBytes,
         snapshotId: snapshot.id,
         createdAt: snapshot.created_at
       })
@@ -460,25 +498,57 @@ export async function restoreSnapshot(db: AppDb, settings: Settings, snapshotId:
   const gameId = snapshot.game_id;
   const saveLocations = listSaveLocations(db, gameId);
   const locationMap = new Map(saveLocations.map((loc) => [loc.id, loc]));
+  const locationPathMap = new Map(
+    saveLocations.map((loc) => [toRestoreLocationPathKey(loc.path, loc.type), loc] as const)
+  );
   const files = db.state.snapshotFiles.filter((item) => item.snapshot_id === snapshotId);
+  if (files.length === 0) {
+    throw new Error('Snapshot contains no files to restore.');
+  }
   const manifest = await readSnapshotManifest(snapshot.storage_path);
   if (!manifest) {
     throw new Error('Snapshot manifest is missing or invalid.');
   }
 
-  const safetySnapshot = await backupGame(db, settings, gameId, 'pre-restore', { skipRetention: true });
-  if (!safetySnapshot) {
-    throw new Error('Restore blocked: failed to create safety backup before restore.');
+  try {
+    const safetySnapshot = await backupGame(db, settings, gameId, 'pre-restore', { skipRetention: true });
+    if (!safetySnapshot) {
+      logEvent(
+        db,
+        gameId,
+        'error',
+        'Proceeding with restore without safety backup: no pre-restore snapshot was created.'
+      );
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error && error.message ? error.message : String(error);
+    logEvent(
+      db,
+      gameId,
+      'error',
+      `Proceeding with restore without safety backup: pre-restore snapshot failed (${message}).`
+    );
   }
 
+  let restoredFiles = 0;
+  let skippedFiles = 0;
   for (const file of files) {
-    const location = locationMap.get(file.location_id);
-    if (!location || !location.enabled) {
+    const location = resolveRestoreTargetLocation(file.location_id, locationMap, locationPathMap, saveLocations, manifest);
+    if (!location) {
+      skippedFiles += 1;
+      logEvent(
+        db,
+        gameId,
+        'error',
+        `Restore skipped for "${file.relative_path}": no matching destination for location "${file.location_id}".`
+      );
       continue;
     }
 
     const sourcePath = resolveSnapshotFileAbsolutePath(snapshot.storage_path, file, manifest);
     if (!fs.existsSync(sourcePath)) {
+      skippedFiles += 1;
+      logEvent(db, gameId, 'error', `Restore skipped for "${file.relative_path}": snapshot file is missing.`);
       continue;
     }
 
@@ -486,6 +556,20 @@ export async function restoreSnapshot(db: AppDb, settings: Settings, snapshotId:
     const destPath = path.resolve(destRoot, file.relative_path);
     assertPathWithinRoot(destRoot, destPath, 'Restore destination path');
     await copyFileWithRetries(sourcePath, destPath, 3);
+    restoredFiles += 1;
+  }
+
+  if (restoredFiles === 0) {
+    throw new Error('Restore failed: no files could be restored to destination paths.');
+  }
+
+  if (skippedFiles > 0) {
+    logEvent(
+      db,
+      gameId,
+      'error',
+      `Restore completed with partial results: restored ${restoredFiles}/${files.length} files.`
+    );
   }
 
   logEvent(db, gameId, 'restore', `Snapshot restored (${snapshot.created_at}).`);
@@ -573,13 +657,9 @@ function readGameMetadata(storageRoot: string, gameFolder: string): RecoveredGam
     const parsed = JSON.parse(raw) as Partial<Game>;
     const id = typeof parsed.id === 'string' && parsed.id.trim().length > 0 ? parsed.id.trim() : null;
     const name = typeof parsed.name === 'string' && parsed.name.trim().length > 0 ? parsed.name.trim() : null;
-    const installPath =
-      typeof parsed.install_path === 'string' && parsed.install_path.trim().length > 0
-        ? parsed.install_path.trim()
-        : null;
-    const exePath =
-      typeof parsed.exe_path === 'string' && parsed.exe_path.trim().length > 0 ? parsed.exe_path.trim() : null;
-    if (!id || !name || !installPath || !exePath) {
+    const installPath = typeof parsed.install_path === 'string' ? parsed.install_path.trim() : '';
+    const exePath = typeof parsed.exe_path === 'string' ? parsed.exe_path.trim() : '';
+    if (!id || !name) {
       return null;
     }
 
@@ -941,6 +1021,69 @@ function ensureUniqueFolderName(base: string, used: Set<string>): string {
   }
   used.add(candidate.toLowerCase());
   return candidate;
+}
+
+function toRestoreLocationPathKey(targetPath: string, type: SaveLocation['type']): string {
+  return `${type}:${normalizePathForKey(targetPath)}`;
+}
+
+function resolveRestoreTargetLocation(
+  locationId: string,
+  locationMap: Map<string, SaveLocation>,
+  locationPathMap: Map<string, SaveLocation>,
+  currentLocations: SaveLocation[],
+  manifest: SnapshotManifestPayload
+): { path: string; type: SaveLocation['type'] } | null {
+  const current = locationMap.get(locationId);
+  if (current) {
+    return {
+      path: current.path,
+      type: current.type
+    };
+  }
+
+  const manifestLocation = manifest.locations[locationId];
+  if (!manifestLocation) {
+    return null;
+  }
+
+  const matchingCurrent = locationPathMap.get(toRestoreLocationPathKey(manifestLocation.path, manifestLocation.type));
+  if (matchingCurrent) {
+    return {
+      path: matchingCurrent.path,
+      type: matchingCurrent.type
+    };
+  }
+
+  const sameTypeCandidates = currentLocations.filter((location) => location.type === manifestLocation.type);
+  if (sameTypeCandidates.length === 1) {
+    const candidate = sameTypeCandidates[0];
+    if (candidate) {
+      return {
+        path: candidate.path,
+        type: candidate.type
+      };
+    }
+  }
+
+  if (currentLocations.length === 1) {
+    const candidate = currentLocations[0];
+    if (candidate) {
+      return {
+        path: candidate.path,
+        type: candidate.type
+      };
+    }
+  }
+
+  if (currentLocations.length > 0) {
+    return null;
+  }
+
+  return {
+    path: manifestLocation.path,
+    type: manifestLocation.type
+  };
 }
 
 function resolveSnapshotFileAbsolutePath(

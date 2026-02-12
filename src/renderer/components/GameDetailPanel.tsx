@@ -1,9 +1,12 @@
+import { useEffect, useState } from 'react';
 import type { GameDetail } from '@shared/types';
 import { useGameDetailActions } from '@renderer/hooks/useGameDetailActions';
+import { getErrorMessage } from '@renderer/lib/error';
 import { formatBytes, formatDate } from '@renderer/lib/format';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Input } from './ui/input';
 import { cn, middleEllipsis } from '@renderer/lib/utils';
 import { ArrowLeftIcon } from 'lucide-react';
 
@@ -26,6 +29,9 @@ export default function GameDetailPanel({
 	onError,
 	onSuccess,
 }: GameDetailPanelProps) {
+	const [nameDraft, setNameDraft] = useState(detail.game.name);
+	const [editingName, setEditingName] = useState(false);
+	const [busyRename, setBusyRename] = useState(false);
 	const {
 		busySnapshot,
 		handleLaunch,
@@ -44,6 +50,36 @@ export default function GameDetailPanel({
 		onError,
 		onSuccess,
 	});
+	const hasExecutablePath = detail.game.exe_path.trim().length > 0;
+	const installPathLabel =
+		detail.game.install_path.trim().length > 0
+			? middleEllipsis(detail.game.install_path, 30, 30)
+			: 'No install folder linked.';
+	const trimmedName = nameDraft.trim();
+	const canSaveName = trimmedName.length > 0 && trimmedName !== detail.game.name;
+
+	useEffect(() => {
+		setNameDraft(detail.game.name);
+		setEditingName(false);
+		setBusyRename(false);
+	}, [detail.game.id, detail.game.name]);
+
+	const handleRename = async () => {
+		if (!canSaveName || busyRename) {
+			return;
+		}
+		setBusyRename(true);
+		try {
+			await window.gamesaver.renameGame(detail.game.id, trimmedName);
+			await onRefresh();
+			setEditingName(false);
+			onSuccess('Game name updated.');
+		} catch (error) {
+			onError(getErrorMessage(error, 'Failed to update game name.'));
+		} finally {
+			setBusyRename(false);
+		}
+	};
 
 	return (
 		<div className='space-y-4'>
@@ -58,17 +94,49 @@ export default function GameDetailPanel({
 				<CardHeader className='gap-3'>
 					<div className='flex flex-col gap-3 md:flex-row md:items-start md:justify-between'>
 						<div className='space-y-2'>
-							<div className='flex items-center gap-2'>
-								<CardTitle>{detail.game.name}</CardTitle>
-								<Badge variant={isRunning ? 'secondary' : 'outline'}>{isRunning ? 'Running' : 'Idle'}</Badge>
-							</div>
+							{editingName ? (
+								<div className='flex flex-col gap-2 sm:flex-row'>
+									<Input
+										value={nameDraft}
+										onChange={(event) => setNameDraft(event.target.value)}
+										autoComplete='off'
+										placeholder='Game name'
+									/>
+									<div className='flex gap-2'>
+										<Button type='button' size='sm' onClick={() => void handleRename()} disabled={!canSaveName || busyRename}>
+											{busyRename ? 'Saving...' : 'Save'}
+										</Button>
+										<Button
+											type='button'
+											variant='ghost'
+											size='sm'
+											disabled={busyRename}
+											onClick={() => {
+												setNameDraft(detail.game.name);
+												setEditingName(false);
+											}}
+										>
+											Cancel
+										</Button>
+									</div>
+								</div>
+							) : (
+								<div className='flex items-center gap-2'>
+									<CardTitle>{detail.game.name}</CardTitle>
+									<Badge variant={isRunning ? 'secondary' : 'outline'}>{isRunning ? 'Running' : 'Idle'}</Badge>
+									<Button type='button' variant='ghost' size='sm' onClick={() => setEditingName(true)}>
+										Rename
+									</Button>
+								</div>
+							)}
 
-							<CardDescription className='break-all line-clamp-1'>
-								{middleEllipsis(detail.game.install_path, 30, 30)}
-							</CardDescription>
+							<CardDescription className='break-all line-clamp-1'>{installPathLabel}</CardDescription>
+							{!hasExecutablePath && (
+								<CardDescription>No executable linked. Add one later if you want one-click launch.</CardDescription>
+							)}
 						</div>
 						<div className='flex flex-wrap gap-2'>
-							<Button variant='outline' onClick={handleLaunch} disabled={isRunning}>
+							<Button variant='outline' onClick={handleLaunch} disabled={isRunning || !hasExecutablePath}>
 								Launch Game
 							</Button>
 							<Button variant='secondary' onClick={handleBackup}>
