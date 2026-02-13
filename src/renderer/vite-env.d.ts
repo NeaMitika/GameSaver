@@ -11,17 +11,21 @@ import type {
   Settings,
   SnapshotCreatedPayload,
   StartupState,
+  UpdateGamePathsPayload,
   VerifyResult,
   SaveLocation
 } from '@shared/types';
 
 declare global {
+  const __APP_VERSION__: string;
+
   interface Window {
     gamesaver: {
       listGames: () => Promise<GameSummary[]>;
       getGame: (gameId: string) => Promise<GameDetail>;
       addGame: (payload: AddGamePayload) => Promise<Game>;
       renameGame: (gameId: string, name: string) => Promise<Game>;
+      updateGamePaths: (payload: UpdateGamePathsPayload) => Promise<Game>;
       removeGame: (gameId: string) => Promise<void>;
       launchGame: (gameId: string) => Promise<void>;
       addSaveLocation: (gameId: string, locationPath: string) => Promise<SaveLocation>;

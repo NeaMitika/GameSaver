@@ -1,6 +1,6 @@
 import fs from 'fs';
 import { v4 as uuid } from 'uuid';
-import { AddGamePayload, Game, GameDetail, GameSummary, SnapshotReason } from '../../shared/types';
+import { AddGamePayload, Game, GameDetail, GameSummary, SnapshotReason, UpdateGamePathsPayload } from '../../shared/types';
 import { detectSaveLocations } from './detectSaveLocations';
 import { AppDb, StoredGame, persistDb } from './db';
 import { logEvent } from './eventLogService';
@@ -151,6 +151,26 @@ export function renameGame(db: AppDb, gameId: string, nextName: string, storageR
   persistDb(db);
   writeGameMetadata(storageRoot, game.folder_name, game);
   logEvent(db, game.id, 'backup', `Game renamed to "${name}".`);
+  return toPublicGame(game);
+}
+
+export function updateGamePaths(db: AppDb, payload: UpdateGamePathsPayload, storageRoot: string): Game {
+  const game = getStoredGameById(db, payload.gameId);
+  if (!game) {
+    throw new Error('Game not found');
+  }
+
+  const nextExePath = payload.exePath.trim();
+  const nextInstallPath = payload.installPath.trim();
+  if (game.exe_path === nextExePath && game.install_path === nextInstallPath) {
+    return toPublicGame(game);
+  }
+
+  game.exe_path = nextExePath;
+  game.install_path = nextInstallPath;
+  persistDb(db);
+  writeGameMetadata(storageRoot, game.folder_name, game);
+  logEvent(db, game.id, 'backup', 'Game executable/install paths updated.');
   return toPublicGame(game);
 }
 

@@ -2,6 +2,20 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
+import fs from 'fs';
+
+function readAppVersion(): string {
+  try {
+    const packageJsonPath = path.resolve(__dirname, 'package.json');
+    const raw = fs.readFileSync(packageJsonPath, 'utf-8');
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === 'string' && parsed.version.trim().length > 0 ? parsed.version.trim() : '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
+const appVersion = readAppVersion();
 
 function cspMetaPlugin(mode: string) {
   return {
@@ -22,6 +36,9 @@ function cspMetaPlugin(mode: string) {
 export default defineConfig(({ mode }) => ({
   base: './',
   plugins: [tailwindcss(), react(), cspMetaPlugin(mode)],
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion)
+  },
   build: {
     outDir: 'dist/renderer',
     emptyOutDir: true,

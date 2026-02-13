@@ -1,4 +1,5 @@
 import type { Settings } from '@shared/types';
+import { LANGUAGE_OPTIONS, normalizeLanguageValue, useI18n } from '@renderer/i18n';
 import { useSettingsPanel } from '@renderer/hooks/useSettingsPanel';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
@@ -13,6 +14,7 @@ type SettingsPanelProps = {
 };
 
 export default function SettingsPanel({ settings, onCancel, onError, onSaved }: SettingsPanelProps) {
+  const { t } = useI18n();
   const {
     backupFrequencyMinutes,
     setBackupFrequencyMinutes,
@@ -22,6 +24,8 @@ export default function SettingsPanel({ settings, onCancel, onError, onSaved }: 
     setStorageRoot,
     dataRoot,
     setDataRoot,
+    language,
+    setLanguage,
     busy,
     pickStorageRoot,
     pickDataRoot,
@@ -32,18 +36,18 @@ export default function SettingsPanel({ settings, onCancel, onError, onSaved }: 
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div>
-          <CardTitle>Settings</CardTitle>
-          <CardDescription>Control retention and backup cadence.</CardDescription>
+          <CardTitle>{t('settings_title')}</CardTitle>
+          <CardDescription>{t('settings_description')}</CardDescription>
         </div>
         <Button variant="ghost" size="sm" onClick={onCancel}>
-          Close
+          {t('common_close')}
         </Button>
       </CardHeader>
 
       <CardContent>
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div className="grid gap-2">
-            <Label htmlFor="backup-frequency">Backup Frequency (minutes)</Label>
+            <Label htmlFor="backup-frequency">{t('settings_backup_frequency')}</Label>
             <Input
               id="backup-frequency"
               type="number"
@@ -54,7 +58,7 @@ export default function SettingsPanel({ settings, onCancel, onError, onSaved }: 
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="retention-count">Retention Count (snapshots per game)</Label>
+            <Label htmlFor="retention-count">{t('settings_retention_count')}</Label>
             <Input
               id="retention-count"
               type="number"
@@ -65,7 +69,7 @@ export default function SettingsPanel({ settings, onCancel, onError, onSaved }: 
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="storage-root">Storage Root</Label>
+            <Label htmlFor="storage-root">{t('settings_storage_root')}</Label>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Input
                 id="storage-root"
@@ -75,14 +79,14 @@ export default function SettingsPanel({ settings, onCancel, onError, onSaved }: 
                 autoComplete="off"
               />
               <Button type="button" variant="outline" onClick={pickStorageRoot}>
-                Browse
+                {t('common_browse')}
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">Changing storage root moves existing backups to the new folder.</p>
+            <p className="text-xs text-muted-foreground">{t('settings_storage_help')}</p>
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="data-root">Data Folder (Settings + DB + Backups)</Label>
+            <Label htmlFor="data-root">{t('settings_data_folder')}</Label>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Input
                 id="data-root"
@@ -92,15 +96,32 @@ export default function SettingsPanel({ settings, onCancel, onError, onSaved }: 
                 autoComplete="off"
               />
               <Button type="button" variant="outline" onClick={pickDataRoot}>
-                Browse
+                {t('common_browse')}
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">Changing this will restart the app and move data if needed.</p>
+            <p className="text-xs text-muted-foreground">{t('settings_data_help')}</p>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="language">{t('settings_language')}</Label>
+            <select
+              id="language"
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              value={language}
+              onChange={(event) => setLanguage(normalizeLanguageValue(event.target.value))}
+            >
+              {LANGUAGE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">{t('settings_language_help')}</p>
           </div>
 
           <div className="flex justify-end">
             <Button type="submit" disabled={busy}>
-              {busy ? 'Saving...' : 'Save Settings'}
+              {busy ? t('settings_saving') : t('settings_save')}
             </Button>
           </div>
         </form>

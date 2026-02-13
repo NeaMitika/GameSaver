@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { Dispatch, FormEvent, SetStateAction } from 'react';
 import type { AddGamePayload, Game } from '@shared/types';
+import { useI18n } from '@renderer/i18n';
 import { getErrorMessage } from '@renderer/lib/error';
 
 type UseAddGamePanelParams = {
@@ -23,6 +24,7 @@ type UseAddGamePanelResult = {
 };
 
 export function useAddGamePanel({ onCreated, onError }: UseAddGamePanelParams): UseAddGamePanelResult {
+  const { t } = useI18n();
   const [name, setName] = useState('');
   const [exePath, setExePath] = useState('');
   const [installPath, setInstallPath] = useState('');
@@ -66,12 +68,12 @@ export function useAddGamePanel({ onCreated, onError }: UseAddGamePanelParams): 
         const game = await window.gamesaver.addGame(payload);
         onCreated(game);
       } catch (error) {
-        onError(getErrorMessage(error, 'Failed to add game.'));
+        onError(getErrorMessage(error, t('add_error_failed')));
       } finally {
         setBusy(false);
       }
     },
-    [canSubmit, exePath, installPath, name, onCreated, onError]
+    [canSubmit, exePath, installPath, name, onCreated, onError, t]
   );
 
   return {

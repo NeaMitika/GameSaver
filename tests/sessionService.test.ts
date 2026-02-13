@@ -35,6 +35,7 @@ const settings: Settings = {
 	storageRoot: 'C:\\Storage',
 	compressionEnabled: false,
 	dataRoot: 'C:\\Data',
+	language: 'en',
 };
 
 describe('sessionService', () => {

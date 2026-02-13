@@ -2,6 +2,7 @@ export type GameStatus = 'protected' | 'warning' | 'error';
 export type SaveLocationType = 'folder' | 'file';
 export type SnapshotReason = 'auto' | 'manual' | 'pre-restore';
 export type EventLogType = 'backup' | 'restore' | 'error';
+export type AppLanguage = 'en' | 'it' | 'fr' | 'de' | 'es';
 
 export interface Game {
   id: string;
@@ -56,6 +57,7 @@ export interface Settings {
   storageRoot: string;
   compressionEnabled: boolean;
   dataRoot: string;
+  language: AppLanguage;
 }
 
 export interface StartupState {
@@ -81,6 +83,12 @@ export interface GameDetail {
 
 export interface AddGamePayload {
   name: string;
+  exePath: string;
+  installPath: string;
+}
+
+export interface UpdateGamePathsPayload {
+  gameId: string;
   exePath: string;
   installPath: string;
 }

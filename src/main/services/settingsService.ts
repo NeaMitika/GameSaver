@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
-import { Settings } from '../../shared/types';
+import { AppLanguage, Settings } from '../../shared/types';
 import { ensureDir } from './storage';
 
 const settingsFileName = 'settings.json';
@@ -12,7 +12,8 @@ const defaultSettings: Settings = {
   retentionCount: 10,
   storageRoot: '',
   compressionEnabled: false,
-  dataRoot: ''
+  dataRoot: '',
+  language: 'en'
 };
 
 let cachedSettings: Settings | null = null;
@@ -33,6 +34,22 @@ function getDefaultStorageRootForDataRoot(dataRoot: string): string {
   return path.join(dataRoot, 'Backups');
 }
 
+function normalizeLanguage(value: unknown): AppLanguage {
+  if (typeof value !== 'string') {
+    return 'en';
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'it' || normalized === 'fr' || normalized === 'de' || normalized === 'es') {
+    return normalized;
+  }
+  return 'en';
+}
+
+function getDefaultLanguage(): AppLanguage {
+  const locale = app.getLocale?.() ?? '';
+  return normalizeLanguage(locale.split('-')[0]);
+}
+
 export function loadSettings(): Settings {
   if (cachedSettings) {
     return cachedSettings;
@@ -43,7 +60,8 @@ export function loadSettings(): Settings {
   const defaults: Settings = {
     ...defaultSettings,
     storageRoot: getDefaultStorageRootForDataRoot(dataRoot),
-    dataRoot
+    dataRoot,
+    language: getDefaultLanguage()
   };
 
   try {
@@ -54,7 +72,8 @@ export function loadSettings(): Settings {
         ...defaults,
         ...parsed,
         storageRoot: parsed.storageRoot || defaults.storageRoot,
-        dataRoot: parsed.dataRoot || defaults.dataRoot
+        dataRoot: parsed.dataRoot || defaults.dataRoot,
+        language: normalizeLanguage(parsed.language)
       };
     } else {
       cachedSettings = defaults;

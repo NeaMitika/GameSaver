@@ -1,8 +1,8 @@
 import type { BackupScanResult } from '@shared/types';
 
-export function formatDate(value: string): string {
+export function formatDate(value: string, locale = 'en-US'): string {
   const date = new Date(value);
-  return new Intl.DateTimeFormat('en-US', {
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: 'medium',
     timeStyle: 'short'
   }).format(date);

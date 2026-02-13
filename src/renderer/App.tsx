@@ -11,6 +11,7 @@ import { useCatalogDetectionToasts } from './hooks/useCatalogDetectionToasts';
 import { useDashboardActions } from './hooks/useDashboardActions';
 import { useDashboardOverview } from './hooks/useDashboardOverview';
 import { useToastNotifications } from './hooks/useToastNotifications';
+import { normalizeLanguageValue, useI18n } from './i18n';
 import { EMPTY_SETTINGS, EMPTY_STARTUP_STATE } from './types/app';
 import type { LayoutMode, Screen } from './types/app';
 
@@ -24,6 +25,7 @@ export default function App() {
 	const [isScanningBackups, setIsScanningBackups] = useState(false);
 	const [startupState, setStartupState] = useState(EMPTY_STARTUP_STATE);
 	const isRecoveryMode = startupState.recoveryMode;
+	const { t, setLanguage } = useI18n();
 
 	const { showNotice, showError } = useToastNotifications();
 	useBackupProgressToasts();
@@ -68,6 +70,7 @@ export default function App() {
 				.then((nextSettings) => {
 					if (!disposed) {
 						setSettings(nextSettings);
+						setLanguage(normalizeLanguageValue(nextSettings.language));
 					}
 				})
 				.catch(() => undefined);
@@ -144,22 +147,22 @@ export default function App() {
 				{isRecoveryMode && (
 					<div className='flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm'>
 						<span>
-							Recovery mode:{' '}
+							{t('app_recovery_mode_prefix')}{' '}
 							{startupState.missingPath
-								? `Could not access ${startupState.missingPath}.`
-								: 'Saved data path is unavailable.'}
+								? t('app_recovery_missing_path', { path: startupState.missingPath })
+								: t('app_recovery_unavailable')}
 						</span>
 						<Button variant='outline' size='sm' onClick={() => setScreen('settings')}>
-							Open Settings
+							{t('common_open_settings')}
 						</Button>
 					</div>
 				)}
 
 				{restartRequired && (
 					<div className='flex flex-wrap items-center justify-between gap-3 rounded-md border bg-secondary px-3 py-2 text-sm text-secondary-foreground'>
-						<span>Data folder updated. Restart required to fully switch app data.</span>
+						<span>{t('app_data_folder_updated')}</span>
 						<Button variant='outline' size='sm' onClick={() => void window.gamesaver.relaunchApp()}>
-							Restart Now
+							{t('app_restart_now')}
 						</Button>
 					</div>
 				)}
@@ -192,13 +195,14 @@ export default function App() {
 						onError={(message) => showNotice('error', message, 5000)}
 						onSaved={async (next) => {
 							setSettings(next);
+							setLanguage(normalizeLanguageValue(next.language));
 							const nextStartupState = await window.gamesaver.getStartupState().catch(() => EMPTY_STARTUP_STATE);
 							setStartupState(nextStartupState);
 							if (!nextStartupState.recoveryMode) {
 								await refreshGames();
-								showNotice('success', 'Settings saved.');
+								showNotice('success', t('app_settings_saved'));
 							} else {
-								showNotice('error', 'Recovery mode is still active. Choose a reachable data folder.', 5000);
+								showNotice('error', t('app_recovery_still_active'), 5000);
 							}
 							setScreen('dashboard');
 						}}

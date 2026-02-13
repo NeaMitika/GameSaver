@@ -9,7 +9,8 @@ export const EMPTY_SETTINGS: Settings = {
   retentionCount: 10,
   storageRoot: '',
   compressionEnabled: false,
-  dataRoot: ''
+  dataRoot: '',
+  language: 'en'
 };
 
 export const EMPTY_STARTUP_STATE: StartupState = {

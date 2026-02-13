@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { addGame, renameGame } from '../src/main/services/gameService';
+import { addGame, renameGame, updateGamePaths } from '../src/main/services/gameService';
 import { createMemoryDb } from '../src/main/services/db';
 
 vi.mock('../src/main/services/detectSaveLocations', () => ({
@@ -201,5 +201,64 @@ describe('gameService addGame edge cases', () => {
     expect(() => renameGame(db, 'game-1', 'half-life', 'X:\\Backups')).toThrow(
       'A game with this name already exists.'
     );
+  });
+
+  it('updates executable/install paths and metadata', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gamesaver-game-service-'));
+    tempRoots.push(root);
+    const storageRoot = path.join(root, 'Backups');
+    fs.mkdirSync(path.join(storageRoot, 'Portal'), { recursive: true });
+    fs.writeFileSync(
+      path.join(storageRoot, 'Portal', 'metadata.json'),
+      JSON.stringify(
+        {
+          id: 'game-1',
+          name: 'Portal',
+          install_path: 'C:\\Old\\Portal',
+          exe_path: 'C:\\Old\\Portal\\portal.exe'
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const db = createMemoryDb({
+      games: [
+        {
+          id: 'game-1',
+          name: 'Portal',
+          install_path: 'C:\\Old\\Portal',
+          exe_path: 'C:\\Old\\Portal\\portal.exe',
+          created_at: new Date().toISOString(),
+          last_seen_at: null,
+          status: 'protected',
+          folder_name: 'Portal'
+        }
+      ]
+    });
+
+    const updated = updateGamePaths(
+      db,
+      {
+        gameId: 'game-1',
+        installPath: 'D:\\Games\\Portal',
+        exePath: 'D:\\Games\\Portal\\portal.exe'
+      },
+      storageRoot
+    );
+
+    expect(updated.install_path).toBe('D:\\Games\\Portal');
+    expect(updated.exe_path).toBe('D:\\Games\\Portal\\portal.exe');
+    expect(db.state.games[0]?.install_path).toBe('D:\\Games\\Portal');
+    expect(db.state.games[0]?.exe_path).toBe('D:\\Games\\Portal\\portal.exe');
+
+    const metadataPath = path.join(storageRoot, 'Portal', 'metadata.json');
+    const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8')) as {
+      install_path?: string;
+      exe_path?: string;
+    };
+    expect(metadata.install_path).toBe('D:\\Games\\Portal');
+    expect(metadata.exe_path).toBe('D:\\Games\\Portal\\portal.exe');
   });
 });

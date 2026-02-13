@@ -1,6 +1,7 @@
 import { Plus, Settings2 } from 'lucide-react';
 import type { GameSummary } from '@shared/types';
 import type { GameOverview } from '@renderer/hooks/useDashboardOverview';
+import { useI18n } from '@renderer/i18n';
 import type { LayoutMode } from '@renderer/types/app';
 import { Button } from '@renderer/components/ui/button';
 import GameRow from './GameRow';
@@ -24,20 +25,22 @@ export default function DashboardScreen({
   overview,
   onAddGame,
   onOpenSettings,
-  onOpenDetail,
-  onBackupNow
+	onOpenDetail,
+	onBackupNow
 }: DashboardScreenProps) {
+  const { t } = useI18n();
+
   if (isRecoveryMode) {
     return (
       <div className="rounded-lg border border-dashed bg-card/50 px-4 py-8 text-center">
-        <p className="text-base font-semibold">Recovery mode enabled</p>
+        <p className="text-base font-semibold">{t('dashboard_recovery_title')}</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          Set a valid Data Folder in Settings to restore your games and backups.
+          {t('dashboard_recovery_description')}
         </p>
         <div className="mt-4">
           <Button variant="outline" onClick={onOpenSettings}>
             <Settings2 />
-            Open Settings
+            {t('common_open_settings')}
           </Button>
         </div>
       </div>
@@ -51,12 +54,12 @@ export default function DashboardScreen({
   if (games.length === 0) {
     return (
       <div className="rounded-lg border border-dashed bg-card/50 px-4 py-8 text-center">
-        <p className="text-base font-semibold">No games yet</p>
-        <p className="mt-1 text-sm text-muted-foreground">Add your first standalone game to start protecting saves.</p>
+        <p className="text-base font-semibold">{t('dashboard_no_games_title')}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{t('dashboard_no_games_description')}</p>
         <div className="mt-4">
           <Button onClick={onAddGame}>
             <Plus />
-            Add Game
+            {t('common_add_game')}
           </Button>
         </div>
       </div>

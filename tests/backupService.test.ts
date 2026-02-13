@@ -50,7 +50,8 @@ const settings: Settings = {
   retentionCount: 10,
   storageRoot: path.join('tmp', 'storage'),
   compressionEnabled: false,
-  dataRoot: path.join('tmp', 'data')
+  dataRoot: path.join('tmp', 'data'),
+  language: 'en'
 };
 
 const tempRoots: string[] = [];

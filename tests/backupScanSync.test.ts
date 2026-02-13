@@ -107,7 +107,8 @@ describe('scanSnapshotsFromDisk', () => {
       retentionCount: 10,
       storageRoot,
       compressionEnabled: false,
-      dataRoot: root
+      dataRoot: root,
+      language: 'en'
     };
 
     const result = await scanSnapshotsFromDisk(db, settings);
@@ -195,7 +196,8 @@ describe('scanSnapshotsFromDisk', () => {
       retentionCount: 10,
       storageRoot,
       compressionEnabled: false,
-      dataRoot: root
+      dataRoot: root,
+      language: 'en'
     };
 
     const result = await scanSnapshotsFromDisk(db, settings);
@@ -270,7 +272,8 @@ describe('scanSnapshotsFromDisk', () => {
       retentionCount: 10,
       storageRoot,
       compressionEnabled: false,
-      dataRoot: root
+      dataRoot: root,
+      language: 'en'
     };
 
     const result = await scanSnapshotsFromDisk(db, settings);

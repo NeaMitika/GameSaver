@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { GameDetail, SaveLocation, Snapshot } from '@shared/types';
+import { useI18n } from '@renderer/i18n';
 import { getErrorMessage } from '@renderer/lib/error';
 
 type UseGameDetailActionsParams = {
@@ -30,26 +31,27 @@ export function useGameDetailActions({
   onError,
   onSuccess
 }: UseGameDetailActionsParams): UseGameDetailActionsResult {
+  const { t } = useI18n();
   const [busySnapshot, setBusySnapshot] = useState<string | null>(null);
 
   const handleLaunch = useCallback(async () => {
     try {
       await window.gamesaver.launchGame(detail.game.id);
-      onSuccess('Game launch requested.');
+      onSuccess(t('action_success_launch_requested'));
     } catch (error) {
-      onError(getErrorMessage(error, 'Failed to launch the game.'));
+      onError(getErrorMessage(error, t('action_error_launch_failed')));
     }
-  }, [detail.game.id, onError, onSuccess]);
+  }, [detail.game.id, onError, onSuccess, t]);
 
   const handleBackup = useCallback(async () => {
     try {
       await window.gamesaver.backupNow(detail.game.id);
       await onRefresh();
-      onSuccess('Backup request completed.');
+      onSuccess(t('action_success_backup_completed'));
     } catch (error) {
-      onError(getErrorMessage(error, 'Failed to back up this game.'));
+      onError(getErrorMessage(error, t('action_error_backup_failed')));
     }
-  }, [detail.game.id, onError, onRefresh, onSuccess]);
+  }, [detail.game.id, onError, onRefresh, onSuccess, t]);
 
   const handleAddLocation = useCallback(async () => {
     try {
@@ -57,39 +59,39 @@ export function useGameDetailActions({
       if (picked) {
         await window.gamesaver.addSaveLocation(detail.game.id, picked);
         await onRefresh();
-        onSuccess('Save location added.');
+        onSuccess(t('action_success_location_added'));
       }
     } catch (error) {
-      onError(getErrorMessage(error, 'Failed to add save location.'));
+      onError(getErrorMessage(error, t('action_error_location_add_failed')));
     }
-  }, [detail.game.id, onError, onRefresh, onSuccess]);
+  }, [detail.game.id, onError, onRefresh, onSuccess, t]);
 
   const handleToggle = useCallback(
     async (location: SaveLocation) => {
       try {
         await window.gamesaver.toggleSaveLocation(location.id, !location.enabled);
         await onRefresh();
-        onSuccess(`Save location ${location.enabled ? 'disabled' : 'enabled'}.`);
+        onSuccess(location.enabled ? t('action_success_location_disabled') : t('action_success_location_enabled'));
       } catch (error) {
-        onError(getErrorMessage(error, 'Failed to update save location.'));
+        onError(getErrorMessage(error, t('action_error_location_update_failed')));
       }
     },
-    [onError, onRefresh, onSuccess]
+    [onError, onRefresh, onSuccess, t]
   );
 
   const handleRemoveLocation = useCallback(
     async (location: SaveLocation) => {
-      const confirmed = confirm('Remove this save location? It will no longer be backed up.');
+      const confirmed = confirm(t('action_confirm_remove_location'));
       if (!confirmed) return;
       try {
         await window.gamesaver.removeSaveLocation(location.id);
         await onRefresh();
-        onSuccess('Save location removed.');
+        onSuccess(t('action_success_location_removed'));
       } catch (error) {
-        onError(getErrorMessage(error, 'Failed to remove save location.'));
+        onError(getErrorMessage(error, t('action_error_location_remove_failed')));
       }
     },
-    [onError, onRefresh, onSuccess]
+    [onError, onRefresh, onSuccess, t]
   );
 
   const handleRestore = useCallback(
@@ -98,32 +100,32 @@ export function useGameDetailActions({
       try {
         await window.gamesaver.restoreSnapshot(snapshot.id);
         await onRefresh();
-        onSuccess('Snapshot restored.');
+        onSuccess(t('action_success_snapshot_restored'));
       } catch (error) {
-        onError(getErrorMessage(error, 'Failed to restore snapshot.'));
+        onError(getErrorMessage(error, t('action_error_snapshot_restore_failed')));
       } finally {
         setBusySnapshot(null);
       }
     },
-    [onError, onRefresh, onSuccess]
+    [onError, onRefresh, onSuccess, t]
   );
 
   const handleDeleteSnapshot = useCallback(
     async (snapshot: Snapshot) => {
-      const confirmed = confirm('Delete this snapshot? This cannot be undone.');
+      const confirmed = confirm(t('action_confirm_delete_snapshot'));
       if (!confirmed) return;
       setBusySnapshot(snapshot.id);
       try {
         await window.gamesaver.deleteSnapshot(snapshot.id);
         await onRefresh();
-        onSuccess('Snapshot deleted.');
+        onSuccess(t('action_success_snapshot_deleted'));
       } catch (error) {
-        onError(getErrorMessage(error, 'Failed to delete snapshot.'));
+        onError(getErrorMessage(error, t('action_error_snapshot_delete_failed')));
       } finally {
         setBusySnapshot(null);
       }
     },
-    [onError, onRefresh, onSuccess]
+    [onError, onRefresh, onSuccess, t]
   );
 
   const handleVerify = useCallback(
@@ -132,30 +134,30 @@ export function useGameDetailActions({
       try {
         const result = await window.gamesaver.verifySnapshot(snapshot.id);
         if (result.ok) {
-          onSuccess('Snapshot verified.');
+          onSuccess(t('action_success_snapshot_verified'));
         } else {
-          onError(`Snapshot has ${result.issues} issue(s).`);
+          onError(t('action_error_snapshot_issues', { count: result.issues }));
         }
       } catch (error) {
-        onError(getErrorMessage(error, 'Failed to verify snapshot.'));
+        onError(getErrorMessage(error, t('action_error_snapshot_verify_failed')));
       } finally {
         setBusySnapshot(null);
       }
     },
-    [onError, onSuccess]
+    [onError, onSuccess, t]
   );
 
   const handleRemove = useCallback(async () => {
-    const confirmed = confirm('Remove this game from GameSaver? Backups will be deleted.');
+    const confirmed = confirm(t('action_confirm_remove_game'));
     if (!confirmed) return;
     try {
       await window.gamesaver.removeGame(detail.game.id);
       onRemove();
-      onSuccess('Game removed.');
+      onSuccess(t('action_success_game_removed'));
     } catch (error) {
-      onError(getErrorMessage(error, 'Failed to remove game.'));
+      onError(getErrorMessage(error, t('action_error_game_remove_failed')));
     }
-  }, [detail.game.id, onError, onRemove, onSuccess]);
+  }, [detail.game.id, onError, onRemove, onSuccess, t]);
 
   return {
     busySnapshot,

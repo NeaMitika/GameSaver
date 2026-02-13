@@ -70,7 +70,8 @@ export function createMemoryDb(initial?: Partial<AppStateData>): AppDb {
       retentionCount: 10,
       storageRoot: '',
       compressionEnabled: false,
-      dataRoot: ''
+      dataRoot: '',
+      language: 'en'
     },
     statePath: null,
     state

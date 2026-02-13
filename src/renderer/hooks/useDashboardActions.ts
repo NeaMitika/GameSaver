@@ -1,9 +1,9 @@
 import { useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { Game, GameDetail, GameSummary } from '@shared/types';
+import { useI18n } from '@renderer/i18n';
 import { toast } from '@renderer/components/ui/sonner';
 import { getErrorMessage } from '@renderer/lib/error';
-import { formatScanResultMessage } from '@renderer/lib/format';
 import type { LayoutMode, Screen } from '@renderer/types/app';
 
 type UseDashboardActionsParams = {
@@ -42,6 +42,25 @@ export function useDashboardActions({
   setIsScanningBackups,
   showError
 }: UseDashboardActionsParams): UseDashboardActionsResult {
+  const { t } = useI18n();
+
+  const formatScanResultMessage = useCallback(
+    (result: Awaited<ReturnType<typeof window.gamesaver.scanBackups>>) => {
+      const parts = [
+        `${result.addedSnapshots} imported`,
+        `${result.removedSnapshots} removed`
+      ];
+      if (result.skippedUnknownGames > 0) {
+        parts.push(`${result.skippedUnknownGames} skipped (unknown game)`);
+      }
+      if (result.skippedInvalidSnapshots > 0) {
+        parts.push(`${result.skippedInvalidSnapshots} skipped (invalid snapshot)`);
+      }
+      return `Scan complete: ${parts.join(', ')}.`;
+    },
+    []
+  );
+
   const refreshGames = useCallback(async () => {
     if (isRecoveryMode) {
       setGames([]);
@@ -51,9 +70,9 @@ export function useDashboardActions({
       const list = await window.gamesaver.listGames();
       setGames(list);
     } catch (error) {
-      showError(error, 'Failed to load games.');
+      showError(error, t('dashboard_error_load_games_failed'));
     }
-  }, [isRecoveryMode, setGames, showError]);
+  }, [isRecoveryMode, setGames, showError, t]);
 
   const openDetail = useCallback(
     async (gameId: string) => {
@@ -62,10 +81,10 @@ export function useDashboardActions({
         setSelectedDetail(detail);
         setScreen('detail');
       } catch (error) {
-        showError(error, 'Failed to open game details.');
+        showError(error, t('dashboard_error_open_detail_failed'));
       }
     },
-    [setScreen, setSelectedDetail, showError]
+    [setScreen, setSelectedDetail, showError, t]
   );
 
   const refreshDetail = useCallback(async () => {
@@ -75,9 +94,9 @@ export function useDashboardActions({
       setSelectedDetail(detail);
       await refreshGames();
     } catch (error) {
-      showError(error, 'Failed to refresh game details.');
+      showError(error, t('dashboard_error_refresh_detail_failed'));
     }
-  }, [refreshGames, selectedDetail, setSelectedDetail, showError]);
+  }, [refreshGames, selectedDetail, setSelectedDetail, showError, t]);
 
   const handleCreated = useCallback(
     (game: Game) => {
@@ -101,18 +120,18 @@ export function useDashboardActions({
         if (selectedDetail) {
           await refreshDetail();
         }
-        toast.success('Backup request completed.');
+        toast.success(t('action_success_backup_completed'));
       } catch (error) {
-        toast.error(getErrorMessage(error, 'Backup failed.'), { duration: 5000 });
+        toast.error(getErrorMessage(error, t('action_error_backup_failed')), { duration: 5000 });
       }
     },
-    [refreshDetail, refreshGames, selectedDetail]
+    [refreshDetail, refreshGames, selectedDetail, t]
   );
 
   const handleScanBackups = useCallback(async () => {
     if (isScanningBackups) return;
     setIsScanningBackups(true);
-    const loadingToastId = toast.loading('Scanning backups...');
+    const loadingToastId = toast.loading(t('dashboard_loading_scan_backups'));
     try {
       const result = await window.gamesaver.scanBackups();
       await refreshGames();
@@ -121,16 +140,16 @@ export function useDashboardActions({
           const detail = await window.gamesaver.getGame(selectedDetail.game.id);
           setSelectedDetail(detail);
         } catch (error) {
-          showError(error, 'Scan finished, but game details failed to refresh.');
+          showError(error, t('dashboard_error_scan_detail_refresh_failed'));
         }
       }
       toast.success(formatScanResultMessage(result), { id: loadingToastId, duration: 5000 });
     } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to scan existing backups.'), { id: loadingToastId, duration: 5000 });
+      toast.error(getErrorMessage(error, t('dashboard_error_scan_failed')), { id: loadingToastId, duration: 5000 });
     } finally {
       setIsScanningBackups(false);
     }
-  }, [isScanningBackups, refreshGames, selectedDetail, setIsScanningBackups, setSelectedDetail, showError]);
+  }, [formatScanResultMessage, isScanningBackups, refreshGames, selectedDetail, setIsScanningBackups, setSelectedDetail, showError, t]);
 
   const toggleLayoutMode = useCallback(async () => {
     const nextMode: LayoutMode = layoutMode === 'widget' ? 'normal' : 'widget';
@@ -142,9 +161,9 @@ export function useDashboardActions({
         setSelectedDetail(null);
       }
     } catch (error) {
-      showError(error, 'Failed to switch view mode.');
+      showError(error, t('dashboard_error_switch_layout_failed'));
     }
-  }, [layoutMode, setLayoutMode, setScreen, setSelectedDetail, showError]);
+  }, [layoutMode, setLayoutMode, setScreen, setSelectedDetail, showError, t]);
 
   return {
     refreshGames,

@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { Dispatch, FormEvent, SetStateAction } from 'react';
-import type { Settings } from '@shared/types';
+import type { AppLanguage, Settings } from '@shared/types';
+import { useI18n } from '@renderer/i18n';
 import { getErrorMessage } from '@renderer/lib/error';
 
 type UseSettingsPanelParams = {
@@ -18,6 +19,8 @@ type UseSettingsPanelResult = {
   setStorageRoot: Dispatch<SetStateAction<string>>;
   dataRoot: string;
   setDataRoot: Dispatch<SetStateAction<string>>;
+  language: AppLanguage;
+  setLanguage: Dispatch<SetStateAction<AppLanguage>>;
   busy: boolean;
   pickStorageRoot: () => Promise<void>;
   pickDataRoot: () => Promise<void>;
@@ -25,10 +28,12 @@ type UseSettingsPanelResult = {
 };
 
 export function useSettingsPanel({ settings, onError, onSaved }: UseSettingsPanelParams): UseSettingsPanelResult {
+  const { t } = useI18n();
   const [backupFrequencyMinutes, setBackupFrequencyMinutes] = useState(settings.backupFrequencyMinutes);
   const [retentionCount, setRetentionCount] = useState(settings.retentionCount);
   const [storageRoot, setStorageRoot] = useState(settings.storageRoot);
   const [dataRoot, setDataRoot] = useState(settings.dataRoot);
+  const [language, setLanguage] = useState<AppLanguage>(settings.language);
   const [busy, setBusy] = useState(false);
 
   const pickStorageRoot = useCallback(async () => {
@@ -55,16 +60,17 @@ export function useSettingsPanel({ settings, onError, onSaved }: UseSettingsPane
           backupFrequencyMinutes: Number(backupFrequencyMinutes),
           retentionCount: Number(retentionCount),
           storageRoot,
-          dataRoot
+          dataRoot,
+          language
         });
         onSaved(next);
       } catch (error) {
-        onError(getErrorMessage(error, 'Failed to save settings.'));
+        onError(getErrorMessage(error, t('settings_error_failed')));
       } finally {
         setBusy(false);
       }
     },
-    [backupFrequencyMinutes, dataRoot, onError, onSaved, retentionCount, storageRoot]
+    [backupFrequencyMinutes, dataRoot, language, onError, onSaved, retentionCount, storageRoot, t]
   );
 
   return {
@@ -76,6 +82,8 @@ export function useSettingsPanel({ settings, onError, onSaved }: UseSettingsPane
     setStorageRoot,
     dataRoot,
     setDataRoot,
+    language,
+    setLanguage,
     busy,
     pickStorageRoot,
     pickDataRoot,

@@ -10,10 +10,11 @@ import {
 	GameSummary,
 	Settings,
 	StartupState,
+	UpdateGamePathsPayload,
 } from '../shared/types';
 import { loadSettings, saveSettings, updateSettings } from './services/settingsService';
 import { getDb, closeDb } from './services/db';
-import { listGames, addGame, getGameDetail, removeGame, getStoredGameById, renameGame } from './services/gameService';
+import { listGames, addGame, getGameDetail, removeGame, getStoredGameById, renameGame, updateGamePaths } from './services/gameService';
 import { addSaveLocation, toggleSaveLocation, removeSaveLocation } from './services/saveLocationService';
 import {
 	backupGame,
@@ -47,6 +48,7 @@ let settings: Settings = {
 	storageRoot: '',
 	compressionEnabled: false,
 	dataRoot: '',
+	language: 'en',
 };
 let db: ReturnType<typeof getDb> | null = null;
 let startupState: StartupState = {
@@ -467,6 +469,17 @@ function toPositiveInteger(value: unknown, field: string): number {
 	return Math.floor(value);
 }
 
+function toLanguage(value: unknown, field: string): Settings['language'] {
+	if (typeof value !== 'string') {
+		throw new Error(`Invalid ${field}`);
+	}
+	const normalized = value.trim().toLowerCase();
+	if (normalized === 'en' || normalized === 'it' || normalized === 'fr' || normalized === 'de' || normalized === 'es') {
+		return normalized;
+	}
+	throw new Error(`Invalid ${field}`);
+}
+
 function parseAddGamePayload(input: unknown): AddGamePayload {
 	const payload = toRecord(input, 'games:add');
 	return {
@@ -481,6 +494,15 @@ function parseRenameGamePayload(input: unknown): { gameId: string; name: string 
 	return {
 		gameId: toNonEmptyString(payload.gameId, 'gameId'),
 		name: toNonEmptyString(payload.name, 'name'),
+	};
+}
+
+function parseUpdateGamePathsPayload(input: unknown): UpdateGamePathsPayload {
+	const payload = toRecord(input, 'games:update-paths');
+	return {
+		gameId: toNonEmptyString(payload.gameId, 'gameId'),
+		exePath: toOptionalString(payload.exePath, 'exePath'),
+		installPath: toOptionalString(payload.installPath, 'installPath'),
 	};
 }
 
@@ -523,6 +545,9 @@ function parseSettingsUpdatePayload(input: unknown): Partial<Settings> {
 	}
 	if (payload.compressionEnabled !== undefined) {
 		next.compressionEnabled = toBoolean(payload.compressionEnabled, 'compressionEnabled');
+	}
+	if (payload.language !== undefined) {
+		next.language = toLanguage(payload.language, 'language');
 	}
 
 	return next;
@@ -959,6 +984,7 @@ function buildRecoverySettings(missingPath: string | null): Settings {
 		compressionEnabled: false,
 		dataRoot,
 		storageRoot: path.join(dataRoot, 'Backups'),
+		language: 'en',
 	};
 }
 
@@ -1127,6 +1153,11 @@ function registerIpc(): void {
 		const payload = parseRenameGamePayload(payloadValue);
 		const game = renameGame(activeDb, payload.gameId, payload.name, settings.storageRoot);
 		return game;
+	});
+	ipcMain.handle('games:update-paths', (_event, payloadValue: unknown) => {
+		const activeDb = getRequiredDb();
+		const payload = parseUpdateGamePathsPayload(payloadValue);
+		return updateGamePaths(activeDb, payload, settings.storageRoot);
 	});
 	ipcMain.handle('games:remove', (_event, gameIdValue: unknown) => {
 		const activeDb = getRequiredDb();

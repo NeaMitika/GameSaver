@@ -3,6 +3,7 @@ import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
 import { formatDate } from '@renderer/lib/format';
 import type { GameOverview } from '@renderer/hooks/useDashboardOverview';
+import { useI18n } from '@renderer/i18n';
 
 type WidgetOverviewProps = {
   overview: GameOverview;
@@ -10,15 +11,17 @@ type WidgetOverviewProps = {
 };
 
 export default function WidgetOverview({ overview, onAddGame }: WidgetOverviewProps) {
+  const { t, locale } = useI18n();
+
   if (overview.total === 0) {
     return (
       <div className="h-full rounded-lg border border-dashed bg-card/50 px-4 py-8 text-center">
-        <p className="text-base font-semibold">No games yet</p>
-        <p className="mt-1 text-sm text-muted-foreground">Add your first standalone game to start protecting saves.</p>
+        <p className="text-base font-semibold">{t('dashboard_no_games_title')}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{t('dashboard_no_games_description')}</p>
         <div className="mt-4">
           <Button onClick={onAddGame}>
             <Plus />
-            Add Game
+            {t('common_add_game')}
           </Button>
         </div>
       </div>
@@ -29,19 +32,22 @@ export default function WidgetOverview({ overview, onAddGame }: WidgetOverviewPr
     <div className="h-full rounded-xl border bg-card p-4 shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <p className="text-base font-semibold">Games Overview</p>
-          <p className="text-xs text-muted-foreground">Compact widget summary</p>
+          <p className="text-base font-semibold">{t('widget_games_overview')}</p>
+          <p className="text-xs text-muted-foreground">{t('widget_compact_summary')}</p>
         </div>
-        <Badge variant="outline">{overview.total} tracked</Badge>
+        <Badge variant="outline">{t('widget_tracked', { count: overview.total })}</Badge>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-        <OverviewStat label="Protected" value={overview.protectedCount} />
-        <OverviewStat label="Warnings" value={overview.warningCount} />
-        <OverviewStat label="Errors" value={overview.errorCount} />
-        <OverviewStat label="Running" value={overview.runningCount} />
-        <OverviewStat label="Total Issues" value={overview.issueTotal} />
-        <OverviewStat label="Last Backup" value={overview.latestBackupAt ? formatDate(overview.latestBackupAt) : 'Never'} />
+        <OverviewStat label={t('widget_protected')} value={overview.protectedCount} />
+        <OverviewStat label={t('widget_warnings')} value={overview.warningCount} />
+        <OverviewStat label={t('widget_errors')} value={overview.errorCount} />
+        <OverviewStat label={t('widget_running')} value={overview.runningCount} />
+        <OverviewStat label={t('widget_total_issues')} value={overview.issueTotal} />
+        <OverviewStat
+          label={t('widget_last_backup')}
+          value={overview.latestBackupAt ? formatDate(overview.latestBackupAt, locale) : t('common_never')}
+        />
       </div>
     </div>
   );
